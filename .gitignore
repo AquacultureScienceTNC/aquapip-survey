@@ -1,0 +1,19 @@
+# NEVER commit real secrets
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# local test artifacts
+_sample_report.pdf
+_pg-*.png

@@ -1,0 +1,10 @@
+# Visual theme for the AquaPIP survey. Colours echo the TNC / MEL palette.
+[theme]
+primaryColor = "#0B4F5C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6F7"
+textColor = "#1A2B2F"
+font = "serif"
+
+[browser]
+gatherUsageStats = false
