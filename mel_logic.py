@@ -604,6 +604,7 @@ def goals_from_codes(codes):
 
 REF_INDICATOR_SHEET = "MEL_Indicators"
 REF_SPECIES_SHEET = "Species_by_Sector"
+REF_STRUCTURE_SHEET = "Structure_by_Sector"
 
 # aquaculture-type (data vocab) -> reference-table sector(s)
 _AQUA_SECTOR = {
@@ -671,7 +672,15 @@ def load_reference(path):
             sp = _s(ws.cell(row=r, column=2).value)
             if sec and sp:
                 species.setdefault(sec, []).append(sp)
-    return {"indicators": indicators, "species": species}
+    structures = {}
+    if REF_STRUCTURE_SHEET in wb.sheetnames:
+        ws = wb[REF_STRUCTURE_SHEET]
+        for r in range(2, ws.max_row + 1):
+            sec = _s(ws.cell(row=r, column=1).value)
+            stv = _s(ws.cell(row=r, column=2).value)
+            if sec and stv:
+                structures.setdefault(sec, []).append(stv)
+    return {"indicators": indicators, "species": species, "structures": structures}
 
 
 def indicators_for_sector(reference, aqua_type):
@@ -718,6 +727,26 @@ def species_options_for(reference, aqua_type):
         return out + always
     # match the sheet's sector key case-insensitively
     for k, v in sp.items():
+        if _norm(k) == a:
+            return list(v) + always
+    return always
+
+
+def structure_options_for(reference, aqua_type):
+    """Farm-structure options for the chosen aquaculture type ('Any' rows always
+    included; IMTA / Not-specific return the union)."""
+    stmap = reference.get("structures", {})
+    always = list(stmap.get("Any", []))
+    a = _norm(aqua_type)
+    if not a or a == "not specific":
+        allst = [x for k, v in stmap.items() if k != "Any" for x in v]
+        return allst + always
+    if "multi-trophic" in a or "imta" in a:
+        out = []
+        for k in ("Seaweed", "Mollusk", "Finfish", "Echinoderm"):
+            out += stmap.get(k, [])
+        return out + always
+    for k, v in stmap.items():
         if _norm(k) == a:
             return list(v) + always
     return always

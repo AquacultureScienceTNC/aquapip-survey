@@ -140,11 +140,13 @@ def render_survey():
     code2label, label2code, code2goal = ml.flatten_options(ind_groups)
     available_codes = set(code2label)
     species_opts = ml.species_options_for(ref, aqua)
+    structure_opts = ml.structure_options_for(ref, aqua)
 
     # reactive reset when the farm type changes
     if st.session_state.get("_prev_aqua") != aqua:
         st.session_state["_prev_aqua"] = aqua
         st.session_state["prof_species"] = "- any -"
+        st.session_state["prof_farm_structure"] = "- any -"
         st.session_state["_prev_fg"] = None
         for k in GROUP_KEYS.values():
             st.session_state[k] = []
@@ -186,8 +188,18 @@ def render_survey():
             st.selectbox("Algae type", ["Not applicable (non-seaweed system)"],
                          disabled=True, key="prof_algae_na")
 
-    rest = [("farm_structure", "Farm structure"), ("farm_scale", "Farm scale"),
-            ("coculture", "Co-culture context"), ("climate_zone", "Climate zone"),
+    c3, c4 = st.columns(2)
+    with c3:
+        stv = st.selectbox("Farm structure", ["- any -"] + structure_opts, key="prof_farm_structure")
+        if stv and stv != "- any -":
+            profile["farm_structure"] = stv
+    with c4:
+        fs = st.selectbox("Farm scale", ["- any -"] + (prof_opts.get("farm_scale") or []),
+                          key="prof_farm_scale")
+        if fs and fs != "- any -":
+            profile["farm_scale"] = fs
+
+    rest = [("coculture", "Co-culture context"), ("climate_zone", "Climate zone"),
             ("site_depth", "Site depth"), ("wave_energy", "Wave energy"),
             ("water_clarity", "Water clarity")]
     rc = st.columns(2)
@@ -246,6 +258,7 @@ def render_learn_indicators():
     if not sub:
         st.session_state.view = "survey"; st.rerun(); return
     aqua = sub["aqua_type"]
+    selected_codes = set(sub["codes"])
 
     nav = st.columns(2)
     with nav[0]:
@@ -256,10 +269,59 @@ def render_learn_indicators():
             st.session_state.view = "learn_classes"; st.rerun()
 
     st.markdown(f"<div class='hero'><h1>Your MEL indicators</h1>"
-                f"<p>A quick primer on what each indicator you chose is really tracking, and how it's "
-                f"measured - for a <b>{aqua}</b> farm.</p></div>", unsafe_allow_html=True)
+                f"<p>The full MEL indicator set for a <b>{aqua}</b> farm, laid out as in the framework. "
+                f"The indicators you selected are highlighted; the rest are greyed so you can see them "
+                f"in context.</p></div>", unsafe_allow_html=True)
 
-    # framework "learn more" box with thumbnail
+    fields = [("Goal", "goal"), ("Objective", "objective"), ("Indicator", "measured"),
+              ("Complexity", "complexity"), ("Metric", "metric"), ("Suggested method", "method"),
+              ("Proxy / additional method", "proxy"), ("Frequency / timing", "frequency"),
+              ("Location of sampling", "location")]
+
+    def matrix(area, inds):
+        color = AREA_COLOR.get(area, TEAL)
+
+        def cstyle(sel):
+            return (f"background:#fff;color:#1A2B2F;border-top:3px solid {color};"
+                    if sel else "background:#F5F6F7;color:#9AA5A8;border-top:3px solid #E4E8E9;")
+
+        head = (f"<td style='min-width:118px;background:{color};color:#fff;font-weight:700;"
+                f"padding:.45rem .55rem;vertical-align:bottom'>{area}</td>")
+        for ind in inds:
+            sel = ind["code"] in selected_codes
+            bg = color if sel else "#B8C0C2"
+            star = " \u2605" if sel else ""
+            name = ind["label"].rsplit(" (", 1)[0]
+            head += (f"<td style='{cstyle(sel)}min-width:158px;padding:.45rem .55rem;vertical-align:bottom'>"
+                     f"<span style='background:{bg};color:#fff;font-size:.66rem;font-weight:700;"
+                     f"padding:.1rem .4rem;border-radius:5px;font-family:monospace'>{ind['code']}{star}</span>"
+                     f"<div style='font-weight:700;font-size:.82rem;margin-top:.25rem'>{name}</div></td>")
+        rows_html = f"<tr>{head}</tr>"
+        for flabel, fkey in fields:
+            cells = (f"<td style='background:#EEF3F4;color:#33474C;font-weight:700;font-size:.66rem;"
+                     f"text-transform:uppercase;letter-spacing:.02em;padding:.35rem .55rem;"
+                     f"vertical-align:top;white-space:nowrap'>{flabel}</td>")
+            for ind in inds:
+                sel = ind["code"] in selected_codes
+                val = ind.get(fkey) or "\u2014"
+                cells += (f"<td style='{cstyle(sel)}padding:.35rem .55rem;vertical-align:top;"
+                          f"font-size:.78rem;line-height:1.3'>{val}</td>")
+            rows_html += f"<tr>{cells}</tr>"
+        return (f"<div style='overflow-x:auto;border:1px solid #E1E7E9;border-radius:10px;"
+                f"margin:.4rem 0 1.1rem'><table style='border-collapse:collapse;width:100%'>"
+                f"{rows_html}</table></div>")
+
+    sector_inds = ml.indicators_for_sector(ref, aqua)
+    if not selected_codes:
+        st.info("You haven't selected any indicators yet - nothing is highlighted below. Go back to "
+                "add some, or read the full set here for context.")
+    for area in ["Habitat & Biodiversity", "Water Quality", "Climate Change"]:
+        inds = [i for i in sector_inds if i["area"] == area]
+        if inds:
+            st.markdown(matrix(area, inds), unsafe_allow_html=True)
+
+    # framework "learn more" box - at the BOTTOM
+    st.divider()
     b1, b2 = st.columns([1, 5])
     with b1:
         if os.path.exists(COVER_IMG):
@@ -268,24 +330,6 @@ def render_learn_indicators():
         st.markdown("<div class='learnbox'><b>Interested in learning more about these indicators?</b><br>"
                     "Read them in full detail in the TNC MEL Framework.</div>", unsafe_allow_html=True)
         st.link_button("Open the MEL Framework (PDF)  \u2197", FRAMEWORK_URL)
-    st.divider()
-
-    sector_inds = ml.indicators_for_sector(ref, aqua)
-    selected = [i for i in sector_inds if i["code"] in sub["codes"]]
-    others = [i for i in sector_inds if i["code"] not in sub["codes"]]
-
-    st.subheader("The indicators you selected")
-    if not selected:
-        st.info("You haven't selected any indicators yet - go back and choose some, or explore the "
-                "full set below.")
-    for ind in selected:
-        st.markdown(indicator_card(ind), unsafe_allow_html=True)
-
-    if others:
-        st.markdown("#### Curious about the other indicators? Explore these below.")
-        for ind in others:
-            with st.expander(f"{ind['code']}  \u00b7  {ind['label']}"):
-                st.markdown(indicator_card(ind), unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -303,12 +347,12 @@ def render_learn_classes():
         if st.button("See my recommendations  ->", type="primary", use_container_width=True):
             st.session_state.view = "results"; st.rerun()
 
-    st.markdown("<div class='hero'><h1>Understanding your protocol recommendations</h1>"
+    st.markdown("<div class='hero'><h1>Understanding our protocol recommendations</h1>"
                 "<p>A quick guide to the labels you'll see on the next page.</p></div>",
                 unsafe_allow_html=True)
 
     st.markdown(
-        "On the next page you'll see a set of monitoring methods - we call them **protocols** - chosen "
+        "On the next page you'll see a set of **protocols** - chosen "
         "to match the MEL indicators you picked. Each comes from the published record: peer-reviewed "
         "scientific studies, plus *grey* and *white* literature such as government manuals, industry "
         "guides, and technical reports. We've read each source and sorted them so the most "
