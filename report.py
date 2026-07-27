@@ -179,7 +179,11 @@ def build_pdf(submission, matches, code2label):
     story.append(Paragraph("YOUR SURVEY RESPONSES", S["h2"]))
     prof = submission.get("profile", {})
     prof_pairs = []
+    if submission.get("aqua_type"):
+        prof_pairs.append(("Aquaculture type", submission["aqua_type"]))
     for fkey, label, _vh, _rk in ml.PROFILE_FIELDS:
+        if fkey == "aqua_type":
+            continue
         v = prof.get(fkey)
         if v:
             prof_pairs.append((label, v))

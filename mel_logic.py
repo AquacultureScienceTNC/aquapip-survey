@@ -544,18 +544,37 @@ def profile_score(row, profile):
     return score, matched
 
 
-def match_protocols(rows, selected_codes, profile):
+def _aqua_match(farmer_aqua, row_aqua_list):
+    """True if a protocol (with its aquaculture-type tags) applies to the
+    farmer's sector. Aquaculture type is a HARD-ish filter (it decides which
+    framework indicators apply); other profile fields stay soft."""
+    fa = _norm(farmer_aqua)
+    if not fa or fa == "not specific":
+        return True
+    rows = [_norm(x) for x in (row_aqua_list or [])]
+    if not rows or any(r in ("not specific", "not applicable", "cross-system") for r in rows):
+        return True  # universally applicable protocol
+    if "multi-trophic" in fa or "imta" in fa:
+        comps = {"seaweed", "mollusk", "echinoderm", "finfish", "multi-trophic (imta)"}
+        return any(r in comps for r in rows)
+    return fa in rows or any("multi-trophic" in r for r in rows)
+
+
+def match_protocols(rows, selected_codes, profile, farmer_aqua=None):
     """For each selected indicator code, return ranked candidate protocols.
 
     Returns OrderedDict: code -> [ {row, pscore, pmatched, badge}, ... ]
-    ranked best-first. 'badge' is True when the farm is a clear fit."""
+    ranked best-first. If farmer_aqua is given, only protocols applicable to
+    that sector are returned (resolves the CC sector-collision). 'badge' is
+    True when the farm is a clear fit on the soft profile fields."""
     result = OrderedDict()
     for code in selected_codes:
         cands = []
         for row in rows:
-            if code in row["indicator_codes"]:
+            if code in row["indicator_codes"] and (
+                    farmer_aqua is None or _aqua_match(farmer_aqua, row["aqua_type"])):
                 pscore, pmatched = profile_score(row, profile)
-                badge = ("aqua_type" in pmatched) and (len(pmatched) >= 2)
+                badge = len(pmatched) >= 2
                 cands.append({"row": row, "pscore": pscore,
                               "pmatched": pmatched, "badge": badge})
         cands.sort(key=lambda d: (
@@ -577,6 +596,137 @@ def goals_from_codes(codes):
         if g and g not in out:
             out.append(g)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# MEL Indicator Reference table (sector-aware picker + education content)
+# --------------------------------------------------------------------------- #
+
+REF_INDICATOR_SHEET = "MEL_Indicators"
+REF_SPECIES_SHEET = "Species_by_Sector"
+
+# aquaculture-type (data vocab) -> reference-table sector(s)
+_AQUA_SECTOR = {
+    "seaweed": ["Seaweed"],
+    "mollusk": ["Molluscs & Echinoderms"],
+    "mollusc": ["Molluscs & Echinoderms"],
+    "echinoderm": ["Molluscs & Echinoderms"],
+    "finfish": ["Marine Finfish"],
+    "marine finfish": ["Marine Finfish"],
+}
+_ALL_SECTORS = ["Seaweed", "Molluscs & Echinoderms", "Marine Finfish"]
+
+
+def sectors_for_aqua(aqua_type):
+    """Reference sector(s) that a farmer's aquaculture type maps to."""
+    a = _norm(aqua_type)
+    if "multi-trophic" in a or "imta" in a:
+        return list(_ALL_SECTORS)
+    if not a or a == "not specific":
+        return list(_ALL_SECTORS)
+    return _AQUA_SECTOR.get(a, list(_ALL_SECTORS))
+
+
+def load_reference(path):
+    """Read MEL_Indicator_Reference.xlsx -> {'indicators': [...], 'species': {sector:[...]}}"""
+    wb = openpyxl.load_workbook(path, data_only=True)
+    indicators = []
+    if REF_INDICATOR_SHEET in wb.sheetnames:
+        ws = wb[REF_INDICATOR_SHEET]
+        H, Hn = {}, {}
+        for c in range(1, ws.max_column + 1):
+            h = ws.cell(row=1, column=c).value
+            if h:
+                H[str(h).strip()] = c
+                Hn[_norm(h)] = c
+
+        def cell(r, name):
+            col = H.get(name) or Hn.get(_norm(name))
+            return _s(ws.cell(row=r, column=col).value) if col else ""
+
+        for r in range(2, ws.max_row + 1):
+            label = cell(r, "Indicator (label + code)") or cell(r, "Indicator")
+            if not label:
+                continue
+            indicators.append({
+                "sector": cell(r, "Sector"),
+                "area": cell(r, "MEL Goal Area"),
+                "label": label,
+                "code": indicator_code(label),
+                "goal": cell(r, "Goal"),
+                "objective": cell(r, "Objective"),
+                "measured": cell(r, "What is measured"),
+                "complexity": cell(r, "Complexity"),
+                "metric": cell(r, "Metric"),
+                "method": cell(r, "Suggested method"),
+                "proxy": cell(r, "Proxy / additional method"),
+                "frequency": cell(r, "Frequency / Timing"),
+                "location": cell(r, "Location of sampling"),
+            })
+    species = {}
+    if REF_SPECIES_SHEET in wb.sheetnames:
+        ws = wb[REF_SPECIES_SHEET]
+        for r in range(2, ws.max_row + 1):
+            sec = _s(ws.cell(row=r, column=1).value)
+            sp = _s(ws.cell(row=r, column=2).value)
+            if sec and sp:
+                species.setdefault(sec, []).append(sp)
+    return {"indicators": indicators, "species": species}
+
+
+def indicators_for_sector(reference, aqua_type):
+    """All reference indicators applicable to the farmer's aquaculture type,
+    in framework order (sector, then goal area, then code)."""
+    sectors = sectors_for_aqua(aqua_type)
+    order_area = {"Habitat & Biodiversity": 0, "Water Quality": 1, "Climate Change": 2}
+    out = [i for i in reference["indicators"] if i["sector"] in sectors]
+    out.sort(key=lambda i: (sectors.index(i["sector"]) if i["sector"] in sectors else 9,
+                            order_area.get(i["area"], 9), _code_sort_key(i["code"])))
+    return out
+
+
+def sector_indicator_groups(reference, aqua_type):
+    """Grouped indicator options for the survey picker (by MEL goal area),
+    filtered to the farmer's sector(s), with sector-correct labels.
+    Returns OrderedDict area -> [ {code, label}, ... ]."""
+    groups = OrderedDict([("Habitat & Biodiversity", []),
+                          ("Water Quality", []),
+                          ("Climate Change", [])])
+    seen = set()
+    for ind in indicators_for_sector(reference, aqua_type):
+        if ind["label"] in seen:      # union dedupe (matters only for IMTA)
+            continue
+        seen.add(ind["label"])
+        if ind["area"] in groups:
+            groups[ind["area"]].append({"code": ind["code"], "label": ind["label"]})
+    return groups
+
+
+def species_options_for(reference, aqua_type):
+    """Cultivated-species options for the chosen aquaculture type ('Any' rows
+    always included; IMTA / Not-specific return the union)."""
+    sp = reference.get("species", {})
+    always = list(sp.get("Any", []))
+    a = _norm(aqua_type)
+    if not a or a == "not specific":
+        allsp = [x for k, v in sp.items() if k != "Any" for x in v]
+        return allsp + always
+    if "multi-trophic" in a or "imta" in a:
+        out = []
+        for k in ("Seaweed", "Mollusk", "Finfish", "Echinoderm"):
+            out += sp.get(k, [])
+        return out + always
+    # match the sheet's sector key case-insensitively
+    for k, v in sp.items():
+        if _norm(k) == a:
+            return list(v) + always
+    return always
+
+
+def algae_applicable(aqua_type):
+    """Algae type only applies to seaweed and multi-trophic systems."""
+    a = _norm(aqua_type)
+    return ("seaweed" in a) or ("multi-trophic" in a) or ("imta" in a)
 
 
 # --------------------------------------------------------------------------- #
