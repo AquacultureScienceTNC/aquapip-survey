@@ -58,8 +58,9 @@ def save_response(submission):
         try:
             if not ws.get_all_values():
                 ws.append_row(
-                    ["timestamp_utc", "farm_name", "interested_in_measuring",
-                     "indicator_codes", "farm_profile_json", "consent"],
+                    ["timestamp_utc", "farm_name", "aquaculture_type",
+                     "interested_in_measuring", "indicator_codes", "farm_profile_json",
+                     "gps_coordinates", "contact_name", "contact_info", "consent"],
                     value_input_option="RAW")
         except Exception:
             pass
@@ -67,9 +68,13 @@ def save_response(submission):
         row = [
             datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
             submission.get("farm_name", ""),
+            submission.get("aqua_type", ""),
             "; ".join(submission.get("farmer_goals", [])),
             "; ".join(submission.get("codes", [])),
             json.dumps(submission.get("profile", {}), ensure_ascii=False),
+            submission.get("gps", ""),
+            submission.get("contact_name", ""),
+            submission.get("contact_info", ""),
             "consented",
         ]
         ws.append_row(row, value_input_option="RAW")

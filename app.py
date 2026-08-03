@@ -83,6 +83,7 @@ for p, name in [(DB_PATH, "data/mel_database.xlsx"),
 rows, vocab, prof_opts, ref = get_data(os.path.getmtime(DB_PATH), os.path.getmtime(REF_PATH))
 AQUA_OPTS = vocab.get("Aquaculture Type") or [
     "Seaweed", "Mollusk", "Echinoderm", "Finfish", "Multi-trophic (IMTA)", "Not specific"]
+CODE_NAMES = ml.code_name_map(ref)   # code -> farmer-facing name (for scrubbing free text)
 
 if "view" not in st.session_state:
     st.session_state.view = "survey"
@@ -97,6 +98,18 @@ def step(txt):
 
 def dots(o):
     return ml.dots(o)
+
+
+def _reset_survey():
+    """Clear all survey answers for a fresh start (Start-over button)."""
+    for k in ["aqua_type", "farmer_goals", "farm_name_input", "prof_species", "prof_algae",
+              "prof_algae_na", "prof_farm_structure", "prof_farm_scale", "prof_coculture",
+              "prof_climate_zone", "prof_site_depth", "prof_wave_energy", "prof_water_clarity",
+              "ind_hb", "ind_wq", "ind_cc", "_prev_aqua", "_prev_fg", "consent",
+              "resp_gps", "resp_name", "resp_contact", "submission", "primary_override",
+              "_save_status"]:
+        st.session_state.pop(k, None)
+    st.session_state["view"] = "survey"
 
 
 def indicator_card(ind):
@@ -179,14 +192,15 @@ def render_survey():
         if sp and sp != "- any -":
             profile["species"] = sp
     with c2:
-        if ml.algae_applicable(aqua):
+        if ml.algae_applicable(aqua) and not profile.get("species"):
             al = st.selectbox("Algae type", ["- any -"] + (prof_opts.get("algae_type") or []),
                               key="prof_algae")
             if al and al != "- any -":
                 profile["algae_type"] = al
         else:
-            st.selectbox("Algae type", ["Not applicable (non-seaweed system)"],
-                         disabled=True, key="prof_algae_na")
+            reason = ("Not needed - you selected a species" if profile.get("species")
+                      else "Not applicable (non-seaweed system)")
+            st.selectbox("Algae type", [reason], disabled=True, key="prof_algae_na")
 
     c3, c4 = st.columns(2)
     with c3:
@@ -232,17 +246,40 @@ def render_survey():
                 codes.append(it["code"])
     st.caption(f"**{len(codes)}** indicator(s) selected.")
 
-    # --- Step 5: consent + continue ---
-    step("5 - Save & continue")
-    consent = st.checkbox(CONSENT_TEXT, value=False, key="consent")
-    if st.button("Continue to your indicators  ->", type="primary"):
+    # --- Step 5: add responses (optional) + continue ---
+    step("5 - Add your responses (optional)")
+    st.markdown("The Global Aquaculture Team is working to gain a better understanding of what "
+                "farmers are looking to monitor on their farms. If you click this option, your "
+                "responses will be added to a database for us to review.")
+    consent = st.checkbox("Yes - add my responses to the database", value=False, key="consent")
+    gps = cname = cinfo = ""
+    if consent:
+        cc1, cc2, cc3 = st.columns(3)
+        with cc1:
+            gps = st.text_input("GPS coordinates", key="resp_gps",
+                                 placeholder="e.g. 44.1234, -68.5678")
+        with cc2:
+            cname = st.text_input("Your name", key="resp_name")
+        with cc3:
+            cinfo = st.text_input("Contact information", key="resp_contact",
+                                  placeholder="email or phone")
+
+    bcol = st.columns([2, 1])
+    with bcol[0]:
+        go = st.button("Continue to your indicators  ->", type="primary", use_container_width=True)
+    with bcol[1]:
+        if st.button("Start over (clear answers)", use_container_width=True):
+            _reset_survey(); st.rerun()
+
+    if go:
         if not codes:
             st.warning("Please select at least one indicator (or pick a goal in step 2 to pre-fill them).")
         else:
             sub = {"farm_name": (farm_name or "").strip(), "aqua_type": aqua,
                    "farmer_goals": list(fg), "codes": codes, "profile": profile,
                    "goals": ml.goals_from_codes(codes), "code2label": code2label,
-                   "consent": bool(consent)}
+                   "gps": gps.strip(), "contact_name": cname.strip(),
+                   "contact_info": cinfo.strip(), "consent": bool(consent)}
             st.session_state["submission"] = sub
             st.session_state["_save_status"] = (
                 storage.save_response(sub) if consent else (None, "no_consent"))
@@ -289,13 +326,14 @@ def render_learn_indicators():
                 f"padding:.45rem .55rem;vertical-align:bottom'>{area}</td>")
         for ind in inds:
             sel = ind["code"] in selected_codes
-            bg = color if sel else "#B8C0C2"
-            star = " \u2605" if sel else ""
-            name = ind["label"].rsplit(" (", 1)[0]
-            head += (f"<td style='{cstyle(sel)}min-width:158px;padding:.45rem .55rem;vertical-align:bottom'>"
-                     f"<span style='background:{bg};color:#fff;font-size:.66rem;font-weight:700;"
-                     f"padding:.1rem .4rem;border-radius:5px;font-family:monospace'>{ind['code']}{star}</span>"
-                     f"<div style='font-weight:700;font-size:.82rem;margin-top:.25rem'>{name}</div></td>")
+            name = ind.get("name") or ind["label"]
+            if sel:
+                chip = (f"<span style='background:{color};color:#fff;font-weight:700;font-size:.84rem;"
+                        f"padding:.2rem .5rem;border-radius:6px;display:inline-block'>{name}</span>")
+            else:
+                chip = f"<span style='color:#9AA5A8;font-weight:600;font-size:.84rem'>{name}</span>"
+            head += (f"<td style='{cstyle(sel)}min-width:158px;padding:.5rem .55rem;vertical-align:bottom'>"
+                     f"{chip}</td>")
         rows_html = f"<tr>{head}</tr>"
         for flabel, fkey in fields:
             cells = (f"<td style='background:#EEF3F4;color:#33474C;font-weight:700;font-size:.66rem;"
@@ -461,6 +499,17 @@ def render_results():
     st.divider()
 
     matches = ml.match_protocols(rows, sub["codes"], sub["profile"], farmer_aqua=sub["aqua_type"])
+
+    # user overrides: move the chosen protocol to the front for that indicator,
+    # so the card, the details section, and the PDF all follow the choice.
+    overrides = st.session_state.setdefault("primary_override", {})
+    for code, cands in matches.items():
+        ov = overrides.get(code)
+        if ov is not None and cands:
+            idx = next((i for i, c in enumerate(cands) if c["row"]["row"] == ov), None)
+            if idx:
+                cands.insert(0, cands.pop(idx))
+
     left, right = st.columns([2, 1])
 
     with left:
@@ -486,13 +535,23 @@ def render_results():
                 f"<span class='tag'>Effort {dots(r['effort_ord'])}</span></div>",
                 unsafe_allow_html=True)
             if len(cands) > 1:
-                with st.expander(f"{len(cands) - 1} more option(s) for {code}"):
+                with st.expander(f"{len(cands) - 1} more option(s) for {label}"):
+                    st.caption("Click any option to view its full details and, if it suits your farm "
+                               "better, choose it as your primary \u2014 that updates the PDF report and "
+                               "the Full protocol details section below.")
                     for alt in cands[1:]:
                         ar = alt["row"]; star = " \u2605" if alt["badge"] else ""
-                        st.markdown(f"<span class='sq' style='background:{ar['tier_color']}'></span>"
-                                    f"<b>T{ar['tier']} {ar['tier_label']}</b>{star} - {ar['title']} "
-                                    f"<span style='color:#5B6B70'>\u00b7 cost {dots(ar['cost_ord'])} "
-                                    f"\u00b7 effort {dots(ar['effort_ord'])}</span>", unsafe_allow_html=True)
+                        with st.popover(f"T{ar['tier']} \u00b7 {ar['title'][:70]}",
+                                        use_container_width=True):
+                            _detail(ar, [label], keyns=f"alt{code}", stacked=True)
+                            st.divider()
+                            st.markdown("**Would you like to choose this as your primary protocol for "
+                                        f"{label} instead?** Selecting this will update the PDF report "
+                                        "and the Full protocol details section below.")
+                            if st.button("Yes, make this my primary", type="primary",
+                                         key=f"mkp_{code}_{ar['row']}"):
+                                st.session_state["primary_override"][code] = ar["row"]
+                                st.rerun()
 
     with right:
         st.subheader("Your survey")
@@ -517,7 +576,7 @@ def render_results():
 
     st.divider()
     try:
-        pdf = report.build_pdf(sub, matches, code2label)
+        pdf = report.build_pdf(sub, matches, code2label, name_map=CODE_NAMES)
         fname = (sub.get("farm_name") or "MEL").replace(" ", "_")[:40]
         st.download_button("Download PDF report", data=pdf,
                            file_name=f"{fname}_MEL_recommendations.pdf",
@@ -538,10 +597,10 @@ def render_results():
         covers = [code2label.get(c, c) for c, cc in matches.items()
                   if cc and cc[0]["row"]["row"] == r["row"]]
         with st.expander(f"{r['title']}  \u00b7  T{r['tier']} {r['tier_label']}"):
-            _detail(r, covers)
+            _detail(r, covers, keyns="main")
 
 
-def _detail(r, covers):
+def _detail(r, covers, keyns="", stacked=False):
     st.markdown(f"**Covers:** {' \u00b7 '.join(covers)}")
     meta = " \u00b7 ".join(x for x in [r["authors"], r["year"], r["publication"]] if x)
     if meta:
@@ -554,6 +613,7 @@ def _detail(r, covers):
     st.write("")
 
     def f(lbl, val):
+        val = ml.strip_indicator_codes(val, CODE_NAMES)
         if val:
             st.markdown(f"**{lbl}**"); st.write(val)
 
@@ -571,17 +631,19 @@ def _detail(r, covers):
         st.markdown(f"**Source:** [{url}]({url})")
 
     st.markdown("**Downloads**")
-    d = st.columns(3)
-    for col, lbl, val in [(d[0], "Normalized protocol", r["url_template"]),
-                          (d[1], "Field data sheet", r["url_datasheet"]),
-                          (d[2], "Stats workbook", r["url_workbook"])]:
+    dls = [("Normalized protocol", r["url_template"]),
+           ("Field data sheet", r["url_datasheet"]),
+           ("Stats workbook", r["url_workbook"])]
+    cols = [None, None, None] if stacked else st.columns(3)
+    for i, (lbl, val) in enumerate(dls):
         u = report.first_url(val)
-        with col:
+        ctx = st.container() if stacked else cols[i]
+        with ctx:
             if u:
                 st.link_button(f"Download {lbl}", u, use_container_width=True)
             else:
                 st.button(f"{lbl} (V2)", disabled=True, use_container_width=True,
-                          key=f"dl_{r['row']}_{lbl}", help="Coming in V2 - not yet available.")
+                          key=f"dl_{keyns}_{r['row']}_{lbl}", help="Coming in V2 - not yet available.")
 
 
 # --------------------------------------------------------------------------- #
