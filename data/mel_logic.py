@@ -507,6 +507,35 @@ def flatten_options(ind_groups):
     return code2label, label2code, code2goal
 
 
+def code_name_map(reference):
+    """Global code -> farmer-facing name across all sectors (first occurrence
+    wins; used to scrub stray code references out of free-text fields)."""
+    m = {}
+    for ind in reference.get("indicators", []):
+        c, n = ind.get("code"), ind.get("name")
+        if c and n and c not in m:
+            m[c] = n
+    return m
+
+
+def strip_indicator_codes(text, name_map=None):
+    """Replace MEL code tokens (e.g. 'H&B 1.1.1') in free text with their
+    farmer-facing names, so no indicator numbers surface in farmer-facing
+    output. Unknown codes are removed. Tidies up leftover spacing."""
+    if not text:
+        return text
+    name_map = name_map or {}
+
+    def _r(mo):
+        key = re.sub(r"\s+", " ", mo.group(0))
+        return name_map.get(key, "")
+
+    t = CODE_RE.sub(_r, str(text))
+    t = re.sub(r"\s{2,}", " ", t)
+    t = re.sub(r"\s+([,.;:])", r"\1", t)
+    return t.strip()
+
+
 def codes_for_farmer_goals(farmer_goals, available_codes):
     """Union of indicator codes pre-selected by the chosen farmer goals,
     filtered to codes that actually exist as options."""
@@ -649,10 +678,12 @@ def load_reference(path):
             label = cell(r, "Indicator (label + code)") or cell(r, "Indicator")
             if not label:
                 continue
+            _name = re.sub(r"\s*\((?:H&B|WQ|CC)\s+\d+\.\d+\.\d+\)\s*$", "", label).strip()
             indicators.append({
                 "sector": cell(r, "Sector"),
                 "area": cell(r, "MEL Goal Area"),
                 "label": label,
+                "name": _name,
                 "code": indicator_code(label),
                 "goal": cell(r, "Goal"),
                 "objective": cell(r, "Objective"),
@@ -696,18 +727,19 @@ def indicators_for_sector(reference, aqua_type):
 
 def sector_indicator_groups(reference, aqua_type):
     """Grouped indicator options for the survey picker (by MEL goal area),
-    filtered to the farmer's sector(s), with sector-correct labels.
-    Returns OrderedDict area -> [ {code, label}, ... ]."""
+    filtered to the farmer's sector(s), using code-free names (farmer-facing).
+    Returns OrderedDict area -> [ {code, label}, ... ] where label is the name."""
     groups = OrderedDict([("Habitat & Biodiversity", []),
                           ("Water Quality", []),
                           ("Climate Change", [])])
     seen = set()
     for ind in indicators_for_sector(reference, aqua_type):
-        if ind["label"] in seen:      # union dedupe (matters only for IMTA)
+        nm = ind.get("name") or ind["label"]
+        if nm in seen:      # dedupe by name (matters only for IMTA)
             continue
-        seen.add(ind["label"])
+        seen.add(nm)
         if ind["area"] in groups:
-            groups[ind["area"]].append({"code": ind["code"], "label": ind["label"]})
+            groups[ind["area"]].append({"code": ind["code"], "label": nm})
     return groups
 
 

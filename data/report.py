@@ -155,7 +155,17 @@ def _tier_pill(rec, S):
 # --------------------------------------------------------------------------- #
 # Main builder
 # --------------------------------------------------------------------------- #
-def build_pdf(submission, matches, code2label):
+# Approximate cost ranges tied to the Low/Medium/High buckets in the database.
+# EDIT THESE to whatever figures the team prefers.
+COST_DOLLARS = {1: "< $500", 2: "$500 \u2013 $5,000", 3: "> $5,000"}
+
+
+def cost_dollars(rec):
+    return COST_DOLLARS.get(rec.get("cost_ord", 0), "\u2014")
+
+
+def build_pdf(submission, matches, code2label, name_map=None):
+    name_map = name_map or {}
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=LETTER,
@@ -250,13 +260,13 @@ def build_pdf(submission, matches, code2label):
             Paragraph(label + badge, S["code"]),
             _tier_pill(rec, S),
             Paragraph(_protocol_title(rec), S["val"]),
-            Dots(rec["cost_ord"], color=TEAL),
+            Paragraph(cost_dollars(rec), S["small"]),
             Dots(rec["effort_ord"], color=TEAL),
         ])
         r_i += 1
 
-    tbl = Table(data, colWidths=[1.25 * inch, 1.25 * inch, 2.7 * inch,
-                                 0.5 * inch, 0.5 * inch], repeatRows=1)
+    tbl = Table(data, colWidths=[1.2 * inch, 1.15 * inch, 2.3 * inch,
+                                 1.05 * inch, 0.5 * inch], repeatRows=1)
     base_style = [
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -272,7 +282,8 @@ def build_pdf(submission, matches, code2label):
     story.append(Spacer(1, 5))
     legend = ("Colour = who can run it:  "
               "T4 Practitioner · T3 Partnership · T2 Researcher · T1 Reference.   "
-              "Dots ●○○→●●● = cost / effort (low→high).   ★ = strong fit to your farm.")
+              "Cost = estimated $ range.   Dots ●○○→●●● = effort (low→high).   "
+              "★ = strong fit to your farm.")
     story.append(Paragraph(legend, S["small"]))
 
     # ---- Detail pages ----------------------------------------------------- #
@@ -299,7 +310,7 @@ def build_pdf(submission, matches, code2label):
     for rid in order:
         blk = seen[rid]
         story.append(_detail_block(blk["rec"], blk["codes"], blk["n_alt"],
-                                   code2label, S))
+                                   code2label, S, name_map))
         story.append(Spacer(1, 6))
         story.append(HRFlowable(width="100%", thickness=0.4, color=HAIR,
                                 spaceAfter=8))
@@ -320,9 +331,10 @@ def _protocol_title(rec):
     return rec["title"] or "(untitled)"
 
 
-def _detail_block(rec, codes, n_alt, code2label, S):
+def _detail_block(rec, codes, n_alt, code2label, S, name_map=None):
+    name_map = name_map or {}
     parts = []
-    code_str = " · ".join(codes)
+    code_str = " · ".join(code2label.get(c, c) for c in codes)
     parts.append(Paragraph(code_str, S["code"]))
     parts.append(Paragraph(_protocol_title(rec), S["proto"]))
     meta = " · ".join(x for x in [rec["authors"], rec["year"], rec["publication"]] if x)
@@ -334,12 +346,10 @@ def _detail_block(rec, codes, n_alt, code2label, S):
     tline = Table([[
         _tier_pill(rec, S),
         Paragraph(f"<b>Skill:</b> {rec['skill']}", S["small"]),
-        Paragraph("<b>Cost:</b> " + (rec["cost_label"] or "—"), S["small"]),
-        Dots(rec["cost_ord"], color=TEAL),
+        Paragraph("<b>Cost:</b> " + cost_dollars(rec), S["small"]),
         Paragraph("<b>Effort:</b> " + (rec["effort_label"] or "—"), S["small"]),
         Dots(rec["effort_ord"], color=TEAL),
-    ]], colWidths=[1.2 * inch, 1.0 * inch, 1.0 * inch, 0.5 * inch,
-                   1.0 * inch, 0.5 * inch])
+    ]], colWidths=[1.2 * inch, 1.0 * inch, 1.35 * inch, 1.0 * inch, 0.5 * inch])
     tline.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                ("TOPPADDING", (0, 0), (-1, -1), 1),
@@ -347,6 +357,7 @@ def _detail_block(rec, codes, n_alt, code2label, S):
     parts.append(tline)
 
     def field(lbl, val, style=None):
+        val = ml.strip_indicator_codes(val, name_map)
         if not val:
             return
         parts.append(Paragraph(lbl.upper(), S["label"]))
@@ -411,6 +422,8 @@ def _detail_block(rec, codes, n_alt, code2label, S):
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     rows, vocab, headers = ml.load_database(os.path.join(here, "data", "mel_database.xlsx"))
+    ref = ml.load_reference(os.path.join(here, "data", "MEL_Indicator_Reference.xlsx"))
+    name_map = ml.code_name_map(ref)
     groups = ml.build_indicator_options(vocab.get("MEL Indicator", []), rows)
     code2label, label2code, code2goal = ml.flatten_options(groups)
     profile = {"aqua_type": "Seaweed", "species": "Saccharina (sugar kelp)",
@@ -426,7 +439,7 @@ if __name__ == "__main__":
                   "profile": profile, "codes": codes,
                   "farmer_goals": ["Blue Carbon — ecosystem-positive farming"],
                   "goals": ml.goals_from_codes(codes)}
-    pdf = build_pdf(submission, matches, code2label)
+    pdf = build_pdf(submission, matches, code2label, name_map=name_map)
     out = os.path.join(here, "_sample_report.pdf")
     with open(out, "wb") as f:
         f.write(pdf)
