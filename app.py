@@ -100,14 +100,38 @@ def dots(o):
     return ml.dots(o)
 
 
+# widget keys whose values must survive leaving and returning to the survey view
+PERSIST_KEYS = ["aqua_type", "farmer_goals", "farm_name_input",
+                "prof_species", "prof_algae", "prof_farm_structure", "prof_farm_scale",
+                "prof_coculture", "prof_climate_zone", "prof_site_depth",
+                "prof_wave_energy", "prof_water_clarity",
+                "ind_hb", "ind_wq", "ind_cc",
+                "consent", "resp_gps", "resp_name", "resp_contact"]
+
+
+def _persist_restore():
+    """Streamlit clears a widget's stored value when that widget isn't rendered
+    (which happens the moment you leave the survey view). Restore each answer
+    from its shadow copy before the widgets are built, so going back keeps them."""
+    for k in PERSIST_KEYS:
+        sk = "_keep_" + k
+        if sk in st.session_state and k not in st.session_state:
+            st.session_state[k] = st.session_state[sk]
+
+
+def _persist_save():
+    """Mirror the current answers into shadow keys Streamlit won't garbage-collect."""
+    for k in PERSIST_KEYS:
+        if k in st.session_state:
+            st.session_state["_keep_" + k] = st.session_state[k]
+
+
 def _reset_survey():
     """Clear all survey answers for a fresh start (Start-over button)."""
-    for k in ["aqua_type", "farmer_goals", "farm_name_input", "prof_species", "prof_algae",
-              "prof_algae_na", "prof_farm_structure", "prof_farm_scale", "prof_coculture",
-              "prof_climate_zone", "prof_site_depth", "prof_wave_energy", "prof_water_clarity",
-              "ind_hb", "ind_wq", "ind_cc", "_prev_aqua", "_prev_fg", "consent",
-              "resp_gps", "resp_name", "resp_contact", "submission", "primary_override",
-              "_save_status"]:
+    keys = (PERSIST_KEYS + ["_keep_" + k for k in PERSIST_KEYS]
+            + ["_prev_aqua", "_prev_fg", "prof_algae_na",
+               "submission", "primary_override", "_save_status"])
+    for k in keys:
         st.session_state.pop(k, None)
     st.session_state["view"] = "survey"
 
@@ -134,6 +158,7 @@ def indicator_card(ind):
 # VIEW 1 - SURVEY
 # --------------------------------------------------------------------------- #
 def render_survey():
+    _persist_restore()
     st.markdown("<div class='hero'><h1>Regenerative Aquaculture - MEL Monitoring Survey</h1>"
                 "<p>Tell us about your farm and what you'd like to measure. We'll match you to "
                 "monitoring protocols from the TNC MEL evidence base - with the most farmer-friendly "
@@ -142,9 +167,10 @@ def render_survey():
 
     # --- Step 1: aquaculture type (drives everything) ---
     step("1 - What do you farm?")
-    aqua = st.selectbox("Aquaculture type", AQUA_OPTS, index=None,
+    _idx = {} if "aqua_type" in st.session_state else {"index": None}
+    aqua = st.selectbox("Aquaculture type", AQUA_OPTS,
                         placeholder="Select your farm type...", key="aqua_type",
-                        label_visibility="collapsed")
+                        label_visibility="collapsed", **_idx)
     if not aqua:
         st.info("Pick your farm type to see the indicators and species that apply to it.")
         return
@@ -251,7 +277,7 @@ def render_survey():
     st.markdown("The Global Aquaculture Team is working to gain a better understanding of what "
                 "farmers are looking to monitor on their farms. If you click this option, your "
                 "responses will be added to a database for us to review.")
-    consent = st.checkbox("Yes - add my responses to the database", value=False, key="consent")
+    consent = st.checkbox("Yes - add my responses to the database", key="consent")
     gps = cname = cinfo = ""
     if consent:
         cc1, cc2, cc3 = st.columns(3)
@@ -270,6 +296,8 @@ def render_survey():
     with bcol[1]:
         if st.button("Start over (clear answers)", use_container_width=True):
             _reset_survey(); st.rerun()
+
+    _persist_save()   # capture every answer before any navigation away from the survey
 
     if go:
         if not codes:
@@ -543,7 +571,7 @@ def render_results():
                         ar = alt["row"]; star = " \u2605" if alt["badge"] else ""
                         with st.popover(f"T{ar['tier']} \u00b7 {ar['title'][:70]}",
                                         use_container_width=True):
-                            _detail(ar, [label], keyns=f"alt{code}", stacked=True)
+                            _detail(ar, [label], keyns=f"alt{code}", stacked=True, show_title=True)
                             st.divider()
                             st.markdown("**Would you like to choose this as your primary protocol for "
                                         f"{label} instead?** Selecting this will update the PDF report "
@@ -600,7 +628,9 @@ def render_results():
             _detail(r, covers, keyns="main")
 
 
-def _detail(r, covers, keyns="", stacked=False):
+def _detail(r, covers, keyns="", stacked=False, show_title=False):
+    if show_title and r.get("title"):
+        st.markdown(f"##### {r['title']}")
     st.markdown(f"**Covers:** {' \u00b7 '.join(covers)}")
     meta = " \u00b7 ".join(x for x in [r["authors"], r["year"], r["publication"]] if x)
     if meta:
