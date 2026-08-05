@@ -256,8 +256,10 @@ def build_pdf(submission, matches, code2label, name_map=None):
             continue
         rec = cands[0]["row"]
         badge = " ★" if cands[0]["badge"] else ""
+        mon_mark = (" <font color='#3E7CB1'>✓</font>"
+                    if cands[0].get("mon_covered") else "")
         data.append([
-            Paragraph(label + badge, S["code"]),
+            Paragraph(label + badge + mon_mark, S["code"]),
             _tier_pill(rec, S),
             Paragraph(_protocol_title(rec), S["val"]),
             Paragraph(cost_dollars(rec), S["small"]),
@@ -283,7 +285,8 @@ def build_pdf(submission, matches, code2label, name_map=None):
     legend = ("Colour = who can run it:  "
               "T4 Practitioner · T3 Partnership · T2 Researcher · T1 Reference.   "
               "Cost = estimated $ range.   Dots ●○○→●●● = effort (low→high).   "
-              "★ = strong fit to your farm.")
+              "★ = strong fit to your farm.   "
+              "<font color='#3E7CB1'>✓</font> = builds on monitoring you already do.")
     story.append(Paragraph(legend, S["small"]))
 
     # ---- Detail pages ----------------------------------------------------- #
@@ -302,7 +305,8 @@ def build_pdf(submission, matches, code2label, name_map=None):
         rec = cands[0]["row"]
         rid = rec["row"]
         if rid not in seen:
-            seen[rid] = {"rec": rec, "codes": [code], "n_alt": len(cands)}
+            seen[rid] = {"rec": rec, "codes": [code], "n_alt": len(cands),
+                         "mon_covered": cands[0].get("mon_covered") or []}
             order.append(rid)
         else:
             seen[rid]["codes"].append(code)
@@ -310,7 +314,7 @@ def build_pdf(submission, matches, code2label, name_map=None):
     for rid in order:
         blk = seen[rid]
         story.append(_detail_block(blk["rec"], blk["codes"], blk["n_alt"],
-                                   code2label, S, name_map))
+                                   code2label, S, name_map, blk.get("mon_covered")))
         story.append(Spacer(1, 6))
         story.append(HRFlowable(width="100%", thickness=0.4, color=HAIR,
                                 spaceAfter=8))
@@ -331,8 +335,9 @@ def _protocol_title(rec):
     return rec["title"] or "(untitled)"
 
 
-def _detail_block(rec, codes, n_alt, code2label, S, name_map=None):
+def _detail_block(rec, codes, n_alt, code2label, S, name_map=None, mon_covered=None):
     name_map = name_map or {}
+    mon_covered = mon_covered or []
     parts = []
     code_str = " · ".join(code2label.get(c, c) for c in codes)
     parts.append(Paragraph(code_str, S["code"]))
@@ -355,6 +360,11 @@ def _detail_block(rec, codes, n_alt, code2label, S, name_map=None):
                                ("TOPPADDING", (0, 0), (-1, -1), 1),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
     parts.append(tline)
+
+    if mon_covered:
+        parts.append(Paragraph(
+            "<font color='#3E7CB1'>✓ BUILDS ON YOUR MONITORING</font>", S["label"]))
+        parts.append(Paragraph(", ".join(mon_covered), S["body"]))
 
     def field(lbl, val, style=None):
         val = ml.strip_indicator_codes(val, name_map)

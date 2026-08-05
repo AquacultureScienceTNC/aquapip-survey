@@ -589,13 +589,21 @@ def _aqua_match(farmer_aqua, row_aqua_list):
     return fa in rows or any("multi-trophic" in r for r in rows)
 
 
-def match_protocols(rows, selected_codes, profile, farmer_aqua=None):
+def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=None):
     """For each selected indicator code, return ranked candidate protocols.
 
-    Returns OrderedDict: code -> [ {row, pscore, pmatched, badge}, ... ]
-    ranked best-first. If farmer_aqua is given, only protocols applicable to
-    that sector are returned (resolves the CC sector-collision). 'badge' is
-    True when the farm is a clear fit on the soft profile fields."""
+    Returns OrderedDict: code -> [ {row, pscore, pmatched, badge, mon,
+    mon_covered}, ... ] ranked best-first. If farmer_aqua is given, only
+    protocols applicable to that sector are returned (resolves the CC
+    sector-collision). 'badge' is True when the farm is a clear fit on the soft
+    profile fields.
+
+    mon_scorer (optional): callable row -> (score 0..1, covered_labels list),
+    the "what are you already monitoring?" boost. When given, it becomes a
+    WITHIN-TIER preference — applied after the protocol-before-reference rule
+    and before the soft farm-fit score, so a protocol the farmer already
+    largely runs floats up within its tier. It never changes the tier itself
+    and never filters. When None, ranking is identical to before."""
     result = OrderedDict()
     for code in selected_codes:
         cands = []
@@ -604,11 +612,14 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None):
                     farmer_aqua is None or _aqua_match(farmer_aqua, row["aqua_type"])):
                 pscore, pmatched = profile_score(row, profile)
                 badge = len(pmatched) >= 2
+                mscore, mcov = mon_scorer(row) if mon_scorer else (0.0, [])
                 cands.append({"row": row, "pscore": pscore,
-                              "pmatched": pmatched, "badge": badge})
+                              "pmatched": pmatched, "badge": badge,
+                              "mon": mscore, "mon_covered": mcov})
         cands.sort(key=lambda d: (
             -d["row"]["tier"],                              # higher tier first
             0 if d["row"]["is_protocol"] else 1,            # protocol before reference
+            -round(d["mon"], 4),                            # already-monitoring boost (within tier)
             -d["pscore"],                                   # better farm fit first
             d["row"]["cost_ord"] if d["row"]["cost_ord"] > 0 else 99,   # cheaper first
             d["row"]["effort_ord"] if d["row"]["effort_ord"] > 0 else 99,  # less effort first

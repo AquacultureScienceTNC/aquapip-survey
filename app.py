@@ -15,6 +15,7 @@ import streamlit as st
 import mel_logic as ml
 import report
 import storage
+import monitoring
 
 # --------------------------------------------------------------------------- #
 # Config + constants
@@ -71,7 +72,8 @@ def get_data(_m_db, _m_ref):
     rows, vocab, headers = ml.load_database(DB_PATH)
     ref = ml.load_reference(REF_PATH)
     prof_opts = ml.profile_options(vocab, rows)
-    return rows, vocab, prof_opts, ref
+    mon = monitoring.load(REF_PATH)   # "what are you already monitoring?" screener
+    return rows, vocab, prof_opts, ref, mon
 
 
 for p, name in [(DB_PATH, "data/mel_database.xlsx"),
@@ -80,7 +82,7 @@ for p, name in [(DB_PATH, "data/mel_database.xlsx"),
         st.error(f"Missing `{name}`. Make sure it's in the repo's data/ folder.")
         st.stop()
 
-rows, vocab, prof_opts, ref = get_data(os.path.getmtime(DB_PATH), os.path.getmtime(REF_PATH))
+rows, vocab, prof_opts, ref, MON = get_data(os.path.getmtime(DB_PATH), os.path.getmtime(REF_PATH))
 AQUA_OPTS = vocab.get("Aquaculture Type") or [
     "Seaweed", "Mollusk", "Echinoderm", "Finfish", "Multi-trophic (IMTA)", "Not specific"]
 CODE_NAMES = ml.code_name_map(ref)   # code -> farmer-facing name (for scrubbing free text)
@@ -117,6 +119,12 @@ def _persist_restore():
         sk = "_keep_" + k
         if sk in st.session_state and k not in st.session_state:
             st.session_state[k] = st.session_state[sk]
+    # monitoring screener uses dynamic keys (mon_cat_*/mon_sub_*); restore them too
+    for sk in list(st.session_state):
+        if sk.startswith("_keep_mon_"):
+            k = sk[len("_keep_"):]
+            if k not in st.session_state:
+                st.session_state[k] = st.session_state[sk]
 
 
 def _persist_save():
@@ -124,15 +132,21 @@ def _persist_save():
     for k in PERSIST_KEYS:
         if k in st.session_state:
             st.session_state["_keep_" + k] = st.session_state[k]
+    for k in list(st.session_state):
+        if k.startswith("mon_"):
+            st.session_state["_keep_" + k] = st.session_state[k]
 
 
 def _reset_survey():
     """Clear all survey answers for a fresh start (Start-over button)."""
     keys = (PERSIST_KEYS + ["_keep_" + k for k in PERSIST_KEYS]
             + ["_prev_aqua", "_prev_fg", "prof_algae_na",
-               "submission", "primary_override", "_save_status"])
+               "submission", "primary_override", "_save_status", "monitoring_sel"])
     for k in keys:
         st.session_state.pop(k, None)
+    for k in list(st.session_state):          # dynamic monitoring keys + shadows
+        if k.startswith("mon_") or k.startswith("_keep_mon_"):
+            st.session_state.pop(k, None)
     st.session_state["view"] = "survey"
 
 
@@ -192,7 +206,7 @@ def render_survey():
 
     # --- Step 2: goals ---
     step("2 - What are you interested in measuring?")
-    st.caption("Optional. Each choice pre-selects a set of MEL indicators you can fine-tune in step 4.")
+    st.caption("Optional. Each choice pre-selects a set of MEL indicators you can fine-tune in step 5.")
     fg = st.multiselect("Goals", list(ml.FARMER_GOALS.keys()), key="farmer_goals",
                         label_visibility="collapsed", placeholder="Choose one or more...")
     for g in fg:
@@ -249,8 +263,15 @@ def render_survey():
             if v and v != "- any -":
                 profile[fkey] = v
 
-    # --- Step 4: indicators (sector-filtered) ---
-    step("4 - Refine your MEL indicators")
+    # --- Step 4: what are you already monitoring? (prioritises, never filters) ---
+    step("4 - What are you already monitoring?")
+    st.caption("Optional. Tick anything you already do - even occasionally, or not every "
+               "season. We'll move protocols that build on what you already measure toward "
+               "the top of their tier. This only changes the order - it never hides protocols.")
+    mon_selected = monitoring.render_screener(MON)
+
+    # --- Step 5: indicators (sector-filtered) ---
+    step("5 - Refine your MEL indicators")
     st.caption(f"Showing indicators that apply to **{aqua}**. Pre-filled from your goals - "
                f"add or remove any.")
     gc = st.columns(3)
@@ -272,8 +293,8 @@ def render_survey():
                 codes.append(it["code"])
     st.caption(f"**{len(codes)}** indicator(s) selected.")
 
-    # --- Step 5: add responses (optional) + continue ---
-    step("5 - Add your responses (optional)")
+    # --- Step 6: add responses (optional) + continue ---
+    step("6 - Add your responses (optional)")
     st.markdown("The Global Aquaculture Team is working to gain a better understanding of what "
                 "farmers are looking to monitor on their farms. If you click this option, your "
                 "responses will be added to a database for us to review.")
@@ -307,7 +328,8 @@ def render_survey():
                    "farmer_goals": list(fg), "codes": codes, "profile": profile,
                    "goals": ml.goals_from_codes(codes), "code2label": code2label,
                    "gps": gps.strip(), "contact_name": cname.strip(),
-                   "contact_info": cinfo.strip(), "consent": bool(consent)}
+                   "contact_info": cinfo.strip(), "consent": bool(consent),
+                   "mon_sel": mon_selected}
             st.session_state["submission"] = sub
             st.session_state["_save_status"] = (
                 storage.save_response(sub) if consent else (None, "no_consent"))
@@ -526,7 +548,11 @@ def render_results():
         _cse_legend()
     st.divider()
 
-    matches = ml.match_protocols(rows, sub["codes"], sub["profile"], farmer_aqua=sub["aqua_type"])
+    sel = sub.get("mon_sel", [])
+    mon_scorer = (lambda row: monitoring.match(
+        row["method_category"], row["method_summary"], sel)) if sel else None
+    matches = ml.match_protocols(rows, sub["codes"], sub["profile"],
+                                 farmer_aqua=sub["aqua_type"], mon_scorer=mon_scorer)
 
     # user overrides: move the chosen protocol to the front for that indicator,
     # so the card, the details section, and the PDF all follow the choice.
@@ -553,9 +579,13 @@ def render_results():
                 continue
             best = cands[0]; r = best["row"]
             fit = "<span class='fit'>\u2605 fits your farm</span>" if best["badge"] else ""
+            mon_cov = best.get("mon_covered") or []
+            mon_chip = ("<span class='fit' style='background:#3E7CB1;margin-left:.3rem'>"
+                        "\u2713 builds on your monitoring: " + ", ".join(mon_cov)
+                        + "</span>") if mon_cov else ""
             st.markdown(
                 f"<div class='proto'><div style='color:{TEAL};font-weight:700;font-size:.85rem'>"
-                f"{label} {fit}</div>"
+                f"{label} {fit}{mon_chip}</div>"
                 f"<div style='font-weight:700;color:#1A2B2F;margin:.15rem 0 .35rem'>{r['title']}</div>"
                 f"<span class='pill' style='background:{r['tier_color']}'>T{r['tier']} \u00b7 {r['tier_label']}</span>"
                 f"<span class='tag'>Skill: {r['skill']}</span>"
@@ -593,6 +623,9 @@ def render_results():
         for fkey, label, _vh, _rk in ml.PROFILE_FIELDS:
             if sub["profile"].get(fkey):
                 html.append(f"<div class='k'>{label}</div><div class='v'>{sub['profile'][fkey]}</div>")
+        if sub.get("mon_sel"):
+            names = ", ".join(sm["sub"] for sm in sub["mon_sel"])
+            html.append("<div class='k'>Already monitoring</div><div class='v'>" + names + "</div>")
         html.append("<div class='k'>Indicators selected</div>")
         for code in sub["codes"]:
             cc = matches.get(code, [])
