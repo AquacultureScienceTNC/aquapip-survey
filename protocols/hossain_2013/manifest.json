@@ -1,0 +1,26 @@
+{
+  "protocol_id": "hossain_2013",
+  "title": "Oyster aquaculture for coastal defense with food production in Bangladesh",
+  "authors": "Hossain, M.S., et al.",
+  "year": 2013,
+  "venue": "Aquaculture Asia XVIII(1):15–24, NACA",
+  "doi": null,
+  "source_url": "https://www.aquaasiapac.com/",
+  "sector": "Mollusc",
+  "usability_tier": 4,
+  "mel_indicators": [
+    "H&B 1.1.1",
+    "H&B 2.2.1"
+  ],
+  "mel_indicators_omitted": [
+    "CC 3.1.1"
+  ],
+  "source_read": "full pdf",
+  "generated": "2026-08-06",
+  "files": {
+    "protocol": "protocol.pdf",
+    "datasheet": "datasheet.pdf",
+    "workbook": "workbook.xlsx"
+  },
+  "note": "Substrate-comparison field experiment. CC 3.1.1 omitted per Rule 3 (method does not monitor wave attenuation)."
+}
