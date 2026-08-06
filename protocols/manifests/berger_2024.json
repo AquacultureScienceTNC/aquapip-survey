@@ -1,0 +1,25 @@
+{
+  "protocol_id": "berger_2024",
+  "title": "Integrating environmental and ecological monitoring with seaweed farming",
+  "authors": "Berger, C., et al.",
+  "year": 2024,
+  "venue": "bioRxiv (preprint)",
+  "doi": "10.1101/2024.02.15.580450",
+  "source_url": "https://doi.org/10.1101/2024.02.15.580450",
+  "sector": "Seaweed",
+  "usability_tier": 4,
+  "mel_indicators": [
+    "H&B 1.1.1",
+    "H&B 1.2.1",
+    "H&B 2.1.1"
+  ],
+  "mel_indicators_omitted": [],
+  "source_read": "full pdf",
+  "generated": "2026-08-06",
+  "files": {
+    "protocol": "protocol.pdf",
+    "datasheet": "datasheet.pdf",
+    "workbook": "workbook.xlsx"
+  },
+  "note": "Multi-method (direct obs + BRUV + PAM); modular protocol/datasheet/workbook. All indicators map cleanly."
+}

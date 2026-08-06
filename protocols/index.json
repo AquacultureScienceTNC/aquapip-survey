@@ -1,20 +1,21 @@
 {
   "generated": "2026-08-06",
+  "base_url": "https://raw.githubusercontent.com/AquacultureScienceTNC/aquapip-survey/main",
   "bundles": {
     "hossain_2013": {
-      "path": "protocols/hossain_2013/",
-      "tier": 4,
-      "sector": "Mollusc"
+      "protocol": "protocols/templates/hossain_2013.pdf",
+      "datasheet": "protocols/datasheets/hossain_2013.pdf",
+      "workbook": "protocols/workbooks/hossain_2013.xlsx"
     },
     "schmidt_2018": {
-      "path": "protocols/schmidt_2018/",
-      "tier": 4,
-      "sector": "Mollusc"
+      "protocol": "protocols/templates/schmidt_2018.pdf",
+      "datasheet": "protocols/datasheets/schmidt_2018.pdf",
+      "workbook": "protocols/workbooks/schmidt_2018.xlsx"
     },
     "berger_2024": {
-      "path": "protocols/berger_2024/",
-      "tier": 4,
-      "sector": "Seaweed"
+      "protocol": "protocols/templates/berger_2024.pdf",
+      "datasheet": "protocols/datasheets/berger_2024.pdf",
+      "workbook": "protocols/workbooks/berger_2024.xlsx"
     }
   }
 }
