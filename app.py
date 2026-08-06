@@ -119,21 +119,12 @@ def _persist_restore():
         sk = "_keep_" + k
         if sk in st.session_state and k not in st.session_state:
             st.session_state[k] = st.session_state[sk]
-    # monitoring screener uses dynamic keys (mon_ms_*); restore them too
-    for sk in list(st.session_state):
-        if sk.startswith("_keep_mon_"):
-            k = sk[len("_keep_"):]
-            if k not in st.session_state:
-                st.session_state[k] = st.session_state[sk]
 
 
 def _persist_save():
     """Mirror the current answers into shadow keys Streamlit won't garbage-collect."""
     for k in PERSIST_KEYS:
         if k in st.session_state:
-            st.session_state["_keep_" + k] = st.session_state[k]
-    for k in list(st.session_state):
-        if k.startswith("mon_"):
             st.session_state["_keep_" + k] = st.session_state[k]
 
 
