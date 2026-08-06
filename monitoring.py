@@ -99,7 +99,7 @@ def load(ref_path):
             o = 9999
         ag = set(_semis(cell(row, "AG_Tags")))
         kw = [k.lower() for k in _semis(cell(row, "AK_Keywords"))]
-        cats.setdefault(cat, []).append({"sub": sub, "ag": ag, "kw": kw})
+        cats.setdefault(cat, []).append({"sub": sub, "cat": cat, "ag": ag, "kw": kw})
         order.setdefault(cat, o)
 
     out = [{"category": c, "order": order[c], "submethods": subs}
@@ -112,43 +112,73 @@ def load(ref_path):
 # Screener page  (presentation-agnostic: caller supplies the section header)
 # --------------------------------------------------------------------------- #
 def render_screener(mon, key_prefix="mon"):
-    """Render the screener as an accordion: one collapsible section per category.
-    Open a category to reveal its sub-methods as directly tappable options (pills
-    where supported, else clickable checkboxes) — tap as many as you like, then
-    collapse it and move on. The selected count shows in each section header so
-    choices stay visible while collapsed. Writes the pooled list of selected
-    sub-method dicts to st.session_state['monitoring_sel'] and returns it."""
+    """Render the screener as a click-to-open accordion. Each category is a
+    full-width header button; clicking it opens (or closes) a panel of that
+    category's sub-methods as tappable pills (or checkboxes on older Streamlit).
+    The panel stays open across selections and only closes when the header is
+    clicked again; the selected count shows in the header. Writes the pooled
+    selected sub-method dicts to st.session_state['monitoring_sel']."""
     selected = []
     use_pills = hasattr(st, "pills")
+
+    open_key = f"{key_prefix}_open_cats"
+    if not isinstance(st.session_state.get(open_key), set):
+        st.session_state[open_key] = set()
+    open_cats = st.session_state[open_key]
+
     for cat in mon:
         c = cat["category"]
         labels = [sm["sub"] for sm in cat["submethods"]]
         by_label = {sm["sub"]: sm for sm in cat["submethods"]}
         key = f"{key_prefix}_ms_{c}"
+        val_key = key + "_val"          # plain key: survives a collapse (not garbage-collected)
+        saved = list(st.session_state.get(val_key, []) or [])
+        is_open = c in open_cats
 
-        # count already-selected (state is updated before this rerun, so it's current)
-        if use_pills:
-            cur = st.session_state.get(key, []) or []
-            n = len(cur) if isinstance(cur, (list, tuple)) else 0
+        # selected count for the header (accurate whether open or collapsed)
+        if is_open and use_pills:
+            live = st.session_state.get(key)
+            n = len(live) if isinstance(live, (list, tuple)) else len(saved)
+        elif is_open:
+            n = sum(1 for lb in labels if st.session_state.get(f"{key}__{lb}"))
         else:
-            n = sum(1 for kk, vv in st.session_state.items()
-                    if kk.startswith(key + "__") and vv)
-        header = c if not n else f"{c}   —   {n} selected"
+            n = len(saved)
 
-        with st.expander(header, expanded=False):
-            if use_pills:
-                picks = st.pills(c, labels, selection_mode="multi", key=key,
-                                 label_visibility="collapsed") or []
+        caret = "\u25be" if is_open else "\u25b8"   # ▾ / ▸
+        header = f"{caret}   {c}" + (f"      ·   {n} selected" if n else "")
+        if st.button(header, key=f"{key_prefix}_hdr_{c}", use_container_width=True):
+            if is_open:
+                open_cats.discard(c)
             else:
-                picks = []
-                cols = st.columns(2)
-                for i, lb in enumerate(labels):
-                    with cols[i % 2]:
-                        if st.checkbox(lb, key=f"{key}__{lb}"):
-                            picks.append(lb)
-            for lb in picks:
-                if lb in by_label:
-                    selected.append(by_label[lb])
+                open_cats.add(c)
+            st.session_state[open_key] = open_cats
+            st.rerun()
+
+        if is_open:
+            with st.container(border=True):
+                if use_pills:
+                    if key not in st.session_state and saved:
+                        st.session_state[key] = list(saved)      # re-seed after a collapse
+                    picks = st.pills(c, labels, selection_mode="multi", key=key,
+                                     label_visibility="collapsed") or []
+                else:
+                    picks = []
+                    saved_set = set(saved)
+                    cols = st.columns(2)
+                    for i, lb in enumerate(labels):
+                        ck = f"{key}__{lb}"
+                        if ck not in st.session_state and lb in saved_set:
+                            st.session_state[ck] = True
+                        with cols[i % 2]:
+                            if st.checkbox(lb, key=ck):
+                                picks.append(lb)
+                st.session_state[val_key] = list(picks)
+        else:
+            picks = saved
+
+        for lb in picks:
+            if lb in by_label:
+                selected.append(by_label[lb])
 
     st.session_state[_SESSION_KEY] = selected
     return selected

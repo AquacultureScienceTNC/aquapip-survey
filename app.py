@@ -356,7 +356,7 @@ def render_monitoring():
     with bcol[0]:
         back = st.button("<-  Back", use_container_width=True)
     with bcol[1]:
-        go = st.button("See my recommendations  ->", type="primary", use_container_width=True)
+        go = st.button("Next  ->  MEL Framework Overview", type="primary", use_container_width=True)
     with bcol[2]:
         if st.button("Start over", use_container_width=True):
             _reset_survey(); st.rerun()
@@ -663,9 +663,6 @@ def render_results():
         for fkey, label, _vh, _rk in ml.PROFILE_FIELDS:
             if sub["profile"].get(fkey):
                 html.append(f"<div class='k'>{label}</div><div class='v'>{sub['profile'][fkey]}</div>")
-        if sub.get("mon_sel"):
-            names = ", ".join(sm["sub"] for sm in sub["mon_sel"])
-            html.append("<div class='k'>Already monitoring</div><div class='v'>" + names + "</div>")
         html.append("<div class='k'>Indicators selected</div>")
         for code in sub["codes"]:
             cc = matches.get(code, [])
@@ -674,6 +671,26 @@ def render_results():
                         f"{code2label.get(code, code)}</div>")
         html.append("</div>")
         st.markdown("".join(html), unsafe_allow_html=True)
+
+        # second box: what they already monitor, grouped by category
+        st.subheader("Your ongoing monitoring")
+        mon_sel = sub.get("mon_sel") or []
+        if mon_sel:
+            grouped = {}
+            for sm in mon_sel:
+                grouped.setdefault(sm.get("cat", "Other"), []).append(sm["sub"])
+            h2 = ["<div class='learnbox'>"]
+            for catname, subs in grouped.items():
+                h2.append(f"<div class='k'>{catname}</div><div class='v'>"
+                          + ", ".join(subs) + "</div>")
+            h2.append("</div>")
+            st.markdown("".join(h2), unsafe_allow_html=True)
+            st.caption("Protocols that build on these are marked "
+                       "\u201c\u2713 builds on your monitoring\u201d and moved up within their tier.")
+        else:
+            st.markdown("<div class='learnbox'><div class='v'>No ongoing monitoring "
+                        "added \u2014 recommendations are ordered by tier and farm fit.</div></div>",
+                        unsafe_allow_html=True)
 
     st.divider()
     try:
