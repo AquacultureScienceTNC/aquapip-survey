@@ -1,0 +1,20 @@
+{
+  "generated": "2026-08-06",
+  "bundles": {
+    "hossain_2013": {
+      "path": "protocols/hossain_2013/",
+      "tier": 4,
+      "sector": "Mollusc"
+    },
+    "schmidt_2018": {
+      "path": "protocols/schmidt_2018/",
+      "tier": 4,
+      "sector": "Mollusc"
+    },
+    "berger_2024": {
+      "path": "protocols/berger_2024/",
+      "tier": 4,
+      "sector": "Seaweed"
+    }
+  }
+}

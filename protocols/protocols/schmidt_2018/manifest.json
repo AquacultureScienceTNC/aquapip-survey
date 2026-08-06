@@ -1,0 +1,25 @@
+{
+  "protocol_id": "schmidt_2018",
+  "title": "Design and operation of a low-cost and compact autonomous buoy system for use in coastal aquaculture and water quality monitoring",
+  "authors": "Schmidt, W., et al.",
+  "year": 2018,
+  "venue": "Aquacultural Engineering 80:28–36",
+  "doi": "10.1016/j.aquaeng.2017.12.002",
+  "source_url": "https://doi.org/10.1016/j.aquaeng.2017.12.002",
+  "sector": "Mollusc",
+  "usability_tier": 4,
+  "mel_indicators": [
+    "WQ 1.2.1"
+  ],
+  "mel_indicators_omitted": [
+    "WQ 2.1.2"
+  ],
+  "source_read": "full pdf",
+  "generated": "2026-08-06",
+  "files": {
+    "protocol": "protocol.pdf",
+    "datasheet": "datasheet.pdf",
+    "workbook": "workbook.xlsx"
+  },
+  "note": "Continuous-sensor branch (datasheet=deployment/calibration log; workbook=RMSE/bias+QC). WQ 2.1.2 omitted per Rule 3."
+}
