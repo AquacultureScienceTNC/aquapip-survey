@@ -11,9 +11,9 @@ WHAT IT DOES
   BY COLUMN HEADER (same philosophy as mel_logic) — reorder or rename columns
   in Excel and nothing here breaks; add/rename/reorder rows and the screener
   updates on next app load.
-* Renders the screener as one collapsible section per Category, each holding a
-  multiselect of its Sub_Methods (selected count shown in the header). The
-  caller supplies the page header/description.
+* Renders the screener as an accordion — one collapsible section per Category;
+  opening one reveals its Sub_Methods as tappable pills (multi-select), with the
+  selected count shown in the header. The caller supplies the page header.
 * Scores each candidate protocol by how much of it the farmer already does, so
   the results page can float "you already do most of this" protocols up within
   their tier. It NEVER filters — a blank screener leaves order unchanged.
@@ -112,26 +112,44 @@ def load(ref_path):
 # Screener page  (presentation-agnostic: caller supplies the section header)
 # --------------------------------------------------------------------------- #
 def render_screener(mon, key_prefix="mon"):
-    """Render the screener as one collapsible section per category, each holding
-    a multiselect of its sub-methods; the selected count shows in the section
-    header so choices stay visible while collapsed. Writes the pooled list of
-    selected sub-method dicts to st.session_state['monitoring_sel'] and returns
-    it. The caller prints the page header/description. `mon` is from load()."""
+    """Render the screener as an accordion: one collapsible section per category.
+    Open a category to reveal its sub-methods as directly tappable options (pills
+    where supported, else clickable checkboxes) — tap as many as you like, then
+    collapse it and move on. The selected count shows in each section header so
+    choices stay visible while collapsed. Writes the pooled list of selected
+    sub-method dicts to st.session_state['monitoring_sel'] and returns it."""
     selected = []
+    use_pills = hasattr(st, "pills")
     for cat in mon:
         c = cat["category"]
         labels = [sm["sub"] for sm in cat["submethods"]]
         by_label = {sm["sub"]: sm for sm in cat["submethods"]}
         key = f"{key_prefix}_ms_{c}"
-        n = len(st.session_state.get(key, []) or [])
+
+        # count already-selected (state is updated before this rerun, so it's current)
+        if use_pills:
+            cur = st.session_state.get(key, []) or []
+            n = len(cur) if isinstance(cur, (list, tuple)) else 0
+        else:
+            n = sum(1 for kk, vv in st.session_state.items()
+                    if kk.startswith(key + "__") and vv)
         header = c if not n else f"{c}   —   {n} selected"
+
         with st.expander(header, expanded=False):
-            picks = st.multiselect(
-                c, labels, key=key, label_visibility="collapsed",
-                placeholder="Choose any you already do…")
-            for lb in (picks or []):
+            if use_pills:
+                picks = st.pills(c, labels, selection_mode="multi", key=key,
+                                 label_visibility="collapsed") or []
+            else:
+                picks = []
+                cols = st.columns(2)
+                for i, lb in enumerate(labels):
+                    with cols[i % 2]:
+                        if st.checkbox(lb, key=f"{key}__{lb}"):
+                            picks.append(lb)
+            for lb in picks:
                 if lb in by_label:
                     selected.append(by_label[lb])
+
     st.session_state[_SESSION_KEY] = selected
     return selected
 
