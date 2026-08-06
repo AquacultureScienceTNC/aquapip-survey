@@ -119,7 +119,7 @@ def _persist_restore():
         sk = "_keep_" + k
         if sk in st.session_state and k not in st.session_state:
             st.session_state[k] = st.session_state[sk]
-    # monitoring screener uses dynamic keys (mon_cat_*/mon_sub_*); restore them too
+    # monitoring screener uses dynamic keys (mon_ms_*); restore them too
     for sk in list(st.session_state):
         if sk.startswith("_keep_mon_"):
             k = sk[len("_keep_"):]
@@ -140,7 +140,7 @@ def _persist_save():
 def _reset_survey():
     """Clear all survey answers for a fresh start (Start-over button)."""
     keys = (PERSIST_KEYS + ["_keep_" + k for k in PERSIST_KEYS]
-            + ["_prev_aqua", "_prev_fg", "prof_algae_na",
+            + ["_prev_aqua", "_prev_fg", "prof_algae_na", "p1",
                "submission", "primary_override", "_save_status", "monitoring_sel"])
     for k in keys:
         st.session_state.pop(k, None)
@@ -206,7 +206,7 @@ def render_survey():
 
     # --- Step 2: goals ---
     step("2 - What are you interested in measuring?")
-    st.caption("Optional. Each choice pre-selects a set of MEL indicators you can fine-tune in step 5.")
+    st.caption("Optional. Each choice pre-selects a set of MEL indicators you can fine-tune in step 4.")
     fg = st.multiselect("Goals", list(ml.FARMER_GOALS.keys()), key="farmer_goals",
                         label_visibility="collapsed", placeholder="Choose one or more...")
     for g in fg:
@@ -263,15 +263,8 @@ def render_survey():
             if v and v != "- any -":
                 profile[fkey] = v
 
-    # --- Step 4: what are you already monitoring? (prioritises, never filters) ---
-    step("4 - What are you already monitoring?")
-    st.caption("Optional. Tick anything you already do - even occasionally, or not every "
-               "season. We'll move protocols that build on what you already measure toward "
-               "the top of their tier. This only changes the order - it never hides protocols.")
-    mon_selected = monitoring.render_screener(MON)
-
-    # --- Step 5: indicators (sector-filtered) ---
-    step("5 - Refine your MEL indicators")
+    # --- Step 4: indicators (sector-filtered) ---
+    step("4 - Refine your MEL indicators")
     st.caption(f"Showing indicators that apply to **{aqua}**. Pre-filled from your goals - "
                f"add or remove any.")
     gc = st.columns(3)
@@ -293,8 +286,56 @@ def render_survey():
                 codes.append(it["code"])
     st.caption(f"**{len(codes)}** indicator(s) selected.")
 
-    # --- Step 6: add responses (optional) + continue ---
-    step("6 - Add your responses (optional)")
+    bcol = st.columns([2, 1])
+    with bcol[0]:
+        go = st.button("Next: what you already monitor  ->", type="primary", use_container_width=True)
+    with bcol[1]:
+        if st.button("Start over (clear answers)", use_container_width=True):
+            _reset_survey(); st.rerun()
+
+    _persist_save()   # capture every answer before navigating away from the survey
+
+    if go:
+        if not codes:
+            st.warning("Please select at least one indicator (or pick a goal in step 2 to pre-fill them).")
+        else:
+            st.session_state["p1"] = {
+                "farm_name": (farm_name or "").strip(), "aqua_type": aqua,
+                "farmer_goals": list(fg), "codes": codes, "profile": profile,
+                "goals": ml.goals_from_codes(codes), "code2label": code2label}
+            st.session_state["view"] = "monitoring"
+            st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+# VIEW 1b - WHAT YOU ALREADY MONITOR  (+ optional responses)
+# --------------------------------------------------------------------------- #
+def render_monitoring():
+    _persist_restore()
+    p1 = st.session_state.get("p1")
+    if not p1:                       # reached without completing page 1
+        st.session_state["view"] = "survey"; st.rerun(); return
+
+    st.markdown(
+        "<div class='hero'><h1>What are you already monitoring?</h1>"
+        "<p>Most farms already collect some data - a temperature logger here, an occasional "
+        "water sample there - but rarely in the systematic, repeatable way that turns "
+        "observations into evidence of a co-benefit.</p></div>", unsafe_allow_html=True)
+    st.divider()
+
+    st.markdown(
+        "Tell us what you already track. We'll move protocols that **build on methods you "
+        "already run** toward the top - shortening the path from what you do today to a "
+        "defensible **Habitat, Water Quality, or Climate** outcome. This only reorders your "
+        "recommendations; it never hides a protocol, and skipping it is completely fine.")
+    st.caption("Open a category and choose anything you already do - even occasionally, or not every season.")
+
+    mon_selected = monitoring.render_screener(MON)
+
+    st.divider()
+
+    # --- optional responses (moved here: the last thing, after all other inputs) ---
+    step("Add your responses (optional)")
     st.markdown("The Global Aquaculture Team is working to gain a better understanding of what "
                 "farmers are looking to monitor on their farms. If you click this option, your "
                 "responses will be added to a database for us to review.")
@@ -311,30 +352,29 @@ def render_survey():
             cinfo = st.text_input("Contact information", key="resp_contact",
                                   placeholder="email or phone")
 
-    bcol = st.columns([2, 1])
+    bcol = st.columns([1, 2, 1])
     with bcol[0]:
-        go = st.button("Continue to your indicators  ->", type="primary", use_container_width=True)
+        back = st.button("<-  Back", use_container_width=True)
     with bcol[1]:
-        if st.button("Start over (clear answers)", use_container_width=True):
+        go = st.button("See my recommendations  ->", type="primary", use_container_width=True)
+    with bcol[2]:
+        if st.button("Start over", use_container_width=True):
             _reset_survey(); st.rerun()
 
-    _persist_save()   # capture every answer before any navigation away from the survey
+    _persist_save()
 
+    if back:
+        st.session_state["view"] = "survey"; st.rerun()
     if go:
-        if not codes:
-            st.warning("Please select at least one indicator (or pick a goal in step 2 to pre-fill them).")
-        else:
-            sub = {"farm_name": (farm_name or "").strip(), "aqua_type": aqua,
-                   "farmer_goals": list(fg), "codes": codes, "profile": profile,
-                   "goals": ml.goals_from_codes(codes), "code2label": code2label,
-                   "gps": gps.strip(), "contact_name": cname.strip(),
-                   "contact_info": cinfo.strip(), "consent": bool(consent),
-                   "mon_sel": mon_selected}
-            st.session_state["submission"] = sub
-            st.session_state["_save_status"] = (
-                storage.save_response(sub) if consent else (None, "no_consent"))
-            st.session_state["view"] = "learn_indicators"
-            st.rerun()
+        sub = dict(p1)
+        sub.update({"gps": gps.strip(), "contact_name": cname.strip(),
+                    "contact_info": cinfo.strip(), "consent": bool(consent),
+                    "mon_sel": mon_selected})
+        st.session_state["submission"] = sub
+        st.session_state["_save_status"] = (
+            storage.save_response(sub) if consent else (None, "no_consent"))
+        st.session_state["view"] = "learn_indicators"
+        st.rerun()
 
 
 # --------------------------------------------------------------------------- #
@@ -715,6 +755,8 @@ def _detail(r, covers, keyns="", stacked=False, show_title=False):
 v = st.session_state.view
 if v == "survey":
     render_survey()
+elif v == "monitoring":
+    render_monitoring()
 elif v == "learn_indicators":
     render_learn_indicators()
 elif v == "learn_classes":

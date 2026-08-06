@@ -11,9 +11,9 @@ WHAT IT DOES
   BY COLUMN HEADER (same philosophy as mel_logic) — reorder or rename columns
   in Excel and nothing here breaks; add/rename/reorder rows and the screener
   updates on next app load.
-* Renders a two-level screener (top-level yes/no per Category; ticking a
-  Category reveals its Sub_Methods). Presentation-agnostic: the caller supplies
-  the section header, so it matches the other survey steps.
+* Renders the screener as one collapsible section per Category, each holding a
+  multiselect of its Sub_Methods (selected count shown in the header). The
+  caller supplies the page header/description.
 * Scores each candidate protocol by how much of it the farmer already does, so
   the results page can float "you already do most of this" protocols up within
   their tier. It NEVER filters — a blank screener leaves order unchanged.
@@ -112,20 +112,26 @@ def load(ref_path):
 # Screener page  (presentation-agnostic: caller supplies the section header)
 # --------------------------------------------------------------------------- #
 def render_screener(mon, key_prefix="mon"):
-    """Render the two-level screener. Writes the pooled list of selected
-    sub-method dicts to st.session_state['monitoring_sel'] and returns it.
-
-    Renders ONLY the checkboxes — the caller prints the step header/caption so
-    this matches the app's other survey steps. `mon` is from load()."""
+    """Render the screener as one collapsible section per category, each holding
+    a multiselect of its sub-methods; the selected count shows in the section
+    header so choices stay visible while collapsed. Writes the pooled list of
+    selected sub-method dicts to st.session_state['monitoring_sel'] and returns
+    it. The caller prints the page header/description. `mon` is from load()."""
     selected = []
     for cat in mon:
         c = cat["category"]
-        if st.checkbox(f"**{c}**", key=f"{key_prefix}_cat_{c}"):
-            cols = st.columns(2)
-            for i, sm in enumerate(cat["submethods"]):
-                with cols[i % 2]:
-                    if st.checkbox(sm["sub"], key=f"{key_prefix}_sub_{c}_{sm['sub']}"):
-                        selected.append(sm)
+        labels = [sm["sub"] for sm in cat["submethods"]]
+        by_label = {sm["sub"]: sm for sm in cat["submethods"]}
+        key = f"{key_prefix}_ms_{c}"
+        n = len(st.session_state.get(key, []) or [])
+        header = c if not n else f"{c}   —   {n} selected"
+        with st.expander(header, expanded=False):
+            picks = st.multiselect(
+                c, labels, key=key, label_visibility="collapsed",
+                placeholder="Choose any you already do…")
+            for lb in (picks or []):
+                if lb in by_label:
+                    selected.append(by_label[lb])
     st.session_state[_SESSION_KEY] = selected
     return selected
 
@@ -200,7 +206,7 @@ def match(row_ag, row_ak, selected,
 #        st.caption("Optional ... only changes the order, never what you see.")
 #        mon_selected = monitoring.render_screener(MON)
 #    ...and carry it into the submission:  sub["mon_sel"] = mon_selected
-#    Persistence: _persist_save/_persist_restore now also sweep "mon_" keys.
+#    Persistence: _persist_save/_persist_restore sweep "mon_" keys (mon_ms_*).
 #
 # 2. RANKING BOOST — in render_results(), build a scorer and pass it in:
 #        sel = sub.get("mon_sel", [])
