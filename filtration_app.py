@@ -33,7 +33,7 @@ PROTOCOL_DIR = os.path.join(HERE, "data", "protocols")
 
 # Set this to your deployed AquaPIP URL to show a cross-link button (leave blank
 # to hide it). e.g. "https://aquapip.streamlit.app"
-AQUAPIP_URL = ""
+AQUAPIP_URL = "https://aquapip-survey.streamlit.app/"
 
 TEAL = "#0B4F5C"
 
