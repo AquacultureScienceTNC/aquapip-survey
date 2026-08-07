@@ -364,11 +364,14 @@ def load_database(path):
         tier_n, tier_label, tier_color, skill = parse_tier(cell(r, "Usability Rating"))
         cost_label, cost_ord = cost_bucket(cell(r, "Estimated Cost"))
         eff_label, eff_ord = effort_bucket(cell(r, "Sampling Effort (deployment time)"))
+        norm_t = _s(cell(r, "Normalized Protocol Title"))   # new column; "" until you fill it
 
         rows.append({
             "row": r,
             "authors": _s(authors),
             "title": _s(title),
+            "norm_title": norm_t,
+            "display_title": norm_t or _s(title),   # headline: normalized title if present, else paper title
             "publication": _s(cell(r, "Publication")),
             "year": _s(cell(r, "Year")),
             "indicators_matched": _s(cell(r, "MEL Indicator(s) Matched")),

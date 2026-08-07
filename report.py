@@ -331,8 +331,8 @@ def build_pdf(submission, matches, code2label, name_map=None):
 
 
 def _protocol_title(rec):
-    """Prefer a concise protocol title; fall back to paper title."""
-    return rec["title"] or "(untitled)"
+    """Headline: the normalized protocol title if present, else the paper title."""
+    return rec.get("display_title") or rec.get("title") or "(untitled)"
 
 
 def _detail_block(rec, codes, n_alt, code2label, S, name_map=None, mon_covered=None):
@@ -342,9 +342,6 @@ def _detail_block(rec, codes, n_alt, code2label, S, name_map=None, mon_covered=N
     code_str = " · ".join(code2label.get(c, c) for c in codes)
     parts.append(Paragraph(code_str, S["code"]))
     parts.append(Paragraph(_protocol_title(rec), S["proto"]))
-    meta = " · ".join(x for x in [rec["authors"], rec["year"], rec["publication"]] if x)
-    if meta:
-        parts.append(Paragraph(meta, S["small"]))
     parts.append(Spacer(1, 3))
 
     # tier + cost + effort line
@@ -390,9 +387,17 @@ def _detail_block(rec, codes, n_alt, code2label, S, name_map=None, mon_covered=N
         field("Executable by practitioner?", rec["exec_practitioner"])
     field("Notes / caveats", rec["notes"])
 
+    # Source section: paper title, authors, link
+    parts.append(Spacer(1, 4))
+    parts.append(Paragraph("SOURCE", S["label"]))
+    if rec.get("title"):
+        _pt = rec["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts.append(Paragraph(f"<i>{_pt}</i>", S["small"]))
+    meta = " · ".join(x for x in [rec["authors"], rec["year"], rec["publication"]] if x)
+    if meta:
+        parts.append(Paragraph(meta, S["small"]))
     url = first_url(rec["url"])
     if url:
-        parts.append(Paragraph("SOURCE", S["label"]))
         parts.append(Paragraph(
             f'<a href="{url}" color="#0B4F5C"><u>{url}</u></a>', S["small"]))
 

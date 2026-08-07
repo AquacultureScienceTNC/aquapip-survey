@@ -617,12 +617,14 @@ def render_results():
             st.markdown(
                 f"<div class='proto'><div style='color:{TEAL};font-weight:700;font-size:.85rem'>"
                 f"{label} {fit}{mon_chip}</div>"
-                f"<div style='font-weight:700;color:#1A2B2F;margin:.15rem 0 .35rem'>{r['title']}</div>"
+                f"<div style='font-weight:700;color:#1A2B2F;margin:.15rem 0 .35rem'>{r['display_title']}</div>"
                 f"<span class='pill' style='background:{r['tier_color']}'>T{r['tier']} \u00b7 {r['tier_label']}</span>"
                 f"<span class='tag'>Skill: {r['skill']}</span>"
                 f"<span class='tag'>Cost {dots(r['cost_ord'])}</span>"
                 f"<span class='tag'>Effort {dots(r['effort_ord'])}</span></div>",
                 unsafe_allow_html=True)
+            with st.expander("View full details"):
+                _detail(r, [label], keyns=f"rec{code}", stacked=True, show_title=False)
             if len(cands) > 1:
                 with st.expander(f"{len(cands) - 1} more option(s) for {label}"):
                     st.caption("Click any option to view its full details and, if it suits your farm "
@@ -630,7 +632,7 @@ def render_results():
                                "the Full protocol details section below.")
                     for alt in cands[1:]:
                         ar = alt["row"]; star = " \u2605" if alt["badge"] else ""
-                        with st.popover(f"T{ar['tier']} \u00b7 {ar['title'][:70]}",
+                        with st.popover(f"T{ar['tier']} \u00b7 {ar['display_title'][:70]}",
                                         use_container_width=True):
                             _detail(ar, [label], keyns=f"alt{code}", stacked=True, show_title=True)
                             st.divider()
@@ -705,17 +707,14 @@ def render_results():
         shown.add(r["row"])
         covers = [code2label.get(c, c) for c, cc in matches.items()
                   if cc and cc[0]["row"]["row"] == r["row"]]
-        with st.expander(f"{r['title']}  \u00b7  T{r['tier']} {r['tier_label']}"):
+        with st.expander(f"{r['display_title']}  \u00b7  T{r['tier']} {r['tier_label']}"):
             _detail(r, covers, keyns="main")
 
 
 def _detail(r, covers, keyns="", stacked=False, show_title=False):
     if show_title and r.get("title"):
-        st.markdown(f"##### {r['title']}")
+        st.markdown(f"##### {r['display_title']}")
     st.markdown(f"**Covers:** {' \u00b7 '.join(covers)}")
-    meta = " \u00b7 ".join(x for x in [r["authors"], r["year"], r["publication"]] if x)
-    if meta:
-        st.caption(meta)
     st.markdown(f"<span class='pill' style='background:{r['tier_color']}'>T{r['tier']} \u00b7 {r['tier_label']}</span> "
                 f"<span class='tag'>Skill: {r['skill']}</span> "
                 f"<span class='tag'>Cost {dots(r['cost_ord'])} ({r['cost_label']})</span> "
@@ -737,9 +736,18 @@ def _detail(r, covers, keyns="", stacked=False, show_title=False):
     f("Statistical approach", r["stats"])
     f("Executable by practitioner?", r["exec_practitioner"])
     f("Notes / caveats", r["notes"])
+
+    # Source section: paper title, authors, link
+    st.write("")
+    st.markdown("**Source**")
+    if r.get("title"):
+        st.markdown(f"*{r['title']}*")
+    meta = " \u00b7 ".join(x for x in [r["authors"], r["year"], r["publication"]] if x)
+    if meta:
+        st.caption(meta)
     url = report.first_url(r["url"])
     if url:
-        st.markdown(f"**Source:** [{url}]({url})")
+        st.markdown(f"[{url}]({url})")
 
     st.markdown("**Downloads**")
     dls = [("Normalized protocol", r["url_template"]),
