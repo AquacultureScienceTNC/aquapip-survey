@@ -595,7 +595,7 @@ def compute_rows(sp, T, rows):
         entry = {"shell_mm": L, "count": ct, "dtw_g": W,
                  "cr_lph": None, "filt_lph": None, "filt_m3d": None, "error": ""}
         try:
-            if L is None or (sp.uses_length and L in (None, 0)):
+            if sp.uses_length and (L is None or L == 0):
                 raise ExprError("enter shell height")
             if sp.needs_dtw and (W is None):
                 raise ExprError("enter dry weight")
