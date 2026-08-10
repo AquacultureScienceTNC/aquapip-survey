@@ -18,13 +18,16 @@ rebooting AquaPIP.
 filtration_app.py                 # Streamlit entrypoint (deploy THIS file)
 filtration_logic.py               # loading + equation translation + safe eval (no Streamlit)
 filtration_report.py              # references export (CSV + styled PDF)
+filtration_storage.py             # saves opt-in farmer dry-weight contributions to a Google Sheet
 data/
   Clearance_rate_estimation_tool_TNC.xlsx   # THE workbook — everything is read from here
   protocols/                      # drop dry-weight protocols here (see its README)
 ```
 
 No new dependencies beyond what AquaPIP already uses: `streamlit`, `openpyxl`,
-`reportlab`. (`pandas` ships with Streamlit.)
+`reportlab`, and — for the opt-in contributions feature — `gspread` and
+`google-auth` (both already in AquaPIP's requirements). `pandas` ships with
+Streamlit.
 
 ---
 
@@ -123,6 +126,33 @@ steps under *Instructions* go into the "How to use this tool" expander; text und
 *Important caveats* becomes the always-visible amber caveats box.
 
 ---
+
+## Farmer dry-weight contributions (opt-in)
+
+When a farmer chooses **"I have my own dry weights by size class,"** the tool
+invites them to save those measurements to help improve the length-weight
+conversions. It's fully opt-in (a consent tick box) and name/email are optional.
+On submit, `filtration_storage.py` writes **one row per size class** — timestamp,
+submission id, species, shell height, dry weight, number of organisms, water
+temperature, and (if given) name and email — to a Google Sheet.
+
+This reuses the same mechanism as AquaPIP. To switch it on, add to the filtration
+app's **Streamlit secrets** (Manage app → Settings → Secrets) — the same service
+account you use for AquaPIP is fine:
+
+```toml
+[gcp_service_account]
+# ... the service-account JSON fields (type, project_id, private_key, client_email, ...) ...
+
+[contributions]
+sheet_id = "your-target-spreadsheet-id"
+worksheet = "dry_weight_contributions"   # optional; created automatically if missing
+```
+
+Share the target spreadsheet with the service account's `client_email` (Editor).
+Until secrets are set, the invitation still shows but submitting reports that
+collection isn't switched on — nothing breaks and nothing is stored. If the farmer
+doesn't tick consent, nothing is ever written.
 
 ## A note on temperature range
 

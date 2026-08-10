@@ -21,6 +21,7 @@ import pandas as pd
 
 import filtration_logic as fl
 import filtration_report as fr
+import filtration_storage as fs
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -233,6 +234,17 @@ with fcol2:
             st.caption("No reference or notes recorded for this species yet.")
 
 
+# Dry-weight source options — defined here so Step 2 can react to the choice the
+# farmer makes in Step 3 (Streamlit persists the radio via its key across reruns).
+OPT_ONE = "Use one dry weight for all"
+OPT_MEAS = "I have my own dry weights by size class (more accurate)"
+OPT_EST = "Estimate dry weight from my shell height"
+_dw_src_prev = st.session_state.get("dwsrc", OPT_ONE)
+# Shell height plays no part in a dry-weight species' clearance-rate formula when a
+# single dry weight is applied to every animal — so it is greyed out in that case.
+shell_unused = (not sp.uses_length) and (_dw_src_prev == OPT_ONE)
+
+
 # --------------------------------------------------------------------------- #
 # 2 — Shell height & how many  (defines the size classes)
 # --------------------------------------------------------------------------- #
@@ -243,16 +255,25 @@ st.caption("Enter the mean shell height of your bivalves and how many you have. 
 size_mode = st.radio("Size entry", ["One shell height", "Several size classes"],
                      horizontal=True, label_visibility="collapsed")
 
+if shell_unused:
+    st.info("Shell height is greyed out because you've chosen **one dry weight for "
+            "all** in the next step. For this species, filtration is then calculated "
+            "from dry weight and temperature only, so shell height isn't used. To "
+            "enter sizes, choose *estimate dry weight from shell height* or "
+            "*measured dry weights by size class* below.")
+
 size_classes = []                       # [{shell_mm, count}, ...]  — source of truth
 if size_mode == "One shell height":
     c1, c2 = st.columns(2)
     with c1:
         _sh = st.number_input("Mean shell height (mm)", min_value=0.0,
-                              max_value=400.0, value=50.0, step=1.0, format="%.1f")
+                              max_value=400.0, value=50.0, step=1.0, format="%.1f",
+                              disabled=shell_unused)
     with c2:
         _n = st.number_input("Number of bivalves", min_value=0, value=1000,
                             step=100, format="%d")
-    size_classes.append({"shell_mm": _num(_sh), "count": _num(_n)})
+    size_classes.append({"shell_mm": None if shell_unused else _num(_sh),
+                         "count": _num(_n)})
 else:
     seed = pd.DataFrame([{"Shell height (mm)": 50.0, "Number of bivalves": 1000},
                          {"Shell height (mm)": 30.0, "Number of bivalves": 1000}])
@@ -261,7 +282,8 @@ else:
         key="sizeclasses",
         column_config={
             "Shell height (mm)": st.column_config.NumberColumn(
-                min_value=0.0, max_value=400.0, step=1.0, format="%.1f"),
+                min_value=0.0, max_value=400.0, step=1.0, format="%.1f",
+                disabled=shell_unused),
             "Number of bivalves": st.column_config.NumberColumn(
                 min_value=0, step=100, format="%d"),
         })
@@ -269,7 +291,7 @@ else:
         sm, ct = _num(r.get("Shell height (mm)")), _num(r.get("Number of bivalves"))
         if sm is None and ct is None:
             continue
-        size_classes.append({"shell_mm": sm, "count": ct})
+        size_classes.append({"shell_mm": None if shell_unused else sm, "count": ct})
 
 if not size_classes:
     st.info("Add at least one size class to continue.")
@@ -282,17 +304,16 @@ if not size_classes:
 step("3 · Dry weight")
 
 dtw_list = [None] * len(size_classes)   # dry tissue weight (g) per size class
+dw_src = None                           # set when a dry-weight source is chosen
 
 if sp.uses_length:
     st.info("Not needed for this species — its filtration is calculated from shell "
             "height directly, so you can skip straight to temperature.")
 else:
     convs = conversions_for(sp.name)
-    OPT_ONE = "Use one dry weight for all"
-    OPT_MEAS = "I have my own dry weights by size class (more accurate)"
-    OPT_EST = "Estimate dry weight from my shell height"
     src = st.radio("Dry-weight source", [OPT_ONE, OPT_MEAS, OPT_EST],
-                   label_visibility="collapsed")
+                   label_visibility="collapsed", key="dwsrc")
+    dw_src = src
     st.caption("This species' equation uses dry tissue weight (g).")
 
     if src == OPT_ONE:
@@ -316,6 +337,62 @@ else:
                 dtw_list[i] = st.number_input(
                     "Dry weight (g)", min_value=0.0, value=1.0, step=0.1,
                     format="%.3f", key=f"dtwmeas_{i}", label_visibility="collapsed")
+
+        # ---- Invitation to contribute these measurements -------------------- #
+        st.markdown(
+            "<div class='card' style='margin-top:.6rem'>"
+            "<b style='color:#0B4F5C'>Help improve the calculator</b><br>"
+            "<span class='v'>We're always working to improve our length-to-dry-weight "
+            "estimates so we can give farmers the most accurate clearance rates. If "
+            "you'd like to contribute to this work, you can save your entries to be "
+            "used in this calculator. Your name and email are optional, but help us "
+            "credit you in any future publications or works. Thank you!</span></div>",
+            unsafe_allow_html=True)
+
+        if st.session_state.get("contrib_saved"):
+            st.success("Thank you — your measurements have been saved and will help "
+                       "improve the tool.")
+        else:
+            with st.popover("✍️  Contribute my measurements",
+                            use_container_width=False):
+                st.markdown("**Contribute your dry-weight measurements**")
+                st.caption("We're always working to improve our length-to-dry-weight "
+                           "estimates so we can give farmers the most accurate "
+                           "clearance rates. Tick the box below to save your entries "
+                           "to be used in this calculator. Your name and email are "
+                           "optional, but help us credit you in any future "
+                           "publications or works. Thank you!")
+                consent = st.checkbox(
+                    "Yes — save my species, size classes, dry weights, temperature "
+                    "and numbers, and use them to improve the calculator.")
+                cn1, cn2 = st.columns(2)
+                with cn1:
+                    contrib_name = st.text_input("Name (optional)", key="contrib_name")
+                with cn2:
+                    contrib_email = st.text_input("Email (optional)", key="contrib_email")
+                if not fs.is_configured():
+                    st.caption("⚠ Data collection isn't switched on for this "
+                               "deployment yet — ask the tool administrator to add "
+                               "the contributions sheet in the app settings.")
+                if st.button("Save my data", type="primary", disabled=not consent,
+                             key="contrib_submit"):
+                    payload = {
+                        "species": sp.name,
+                        "temperature_c": st.session_state.get("watertemp"),
+                        "name": (contrib_name or "").strip(),
+                        "email": (contrib_email or "").strip(),
+                        "classes": [{"shell_mm": sc["shell_mm"],
+                                     "dtw_g": dtw_list[i],
+                                     "count": sc["count"]}
+                                    for i, sc in enumerate(size_classes)],
+                    }
+                    ok, status = fs.save_contribution(payload)
+                    if ok:
+                        st.session_state["contrib_saved"] = True
+                        st.rerun()
+                    else:
+                        st.warning("Sorry, we couldn't save that right now. Please "
+                                   "try again later.")
 
     else:  # OPT_EST — estimate from shell height using a length-weight conversion
         if convs:
@@ -358,7 +435,7 @@ step("4 · Water temperature")
 st.caption("The water temperature at your site. Filtration changes with "
            "temperature, so use a value for the period you care about.")
 temp = st.number_input("Water temperature (°C)", min_value=0.0, max_value=40.0,
-                       value=18.0, step=0.5, format="%.1f")
+                       value=18.0, step=0.5, format="%.1f", key="watertemp")
 
 
 # --------------------------------------------------------------------------- #
@@ -381,10 +458,14 @@ with m2:
 st.caption(f"Total across **{fmt_int(totals['count'])}** animals at "
            f"**{temp:.1f} °C**. This is a best-case maximum (see caveats above).")
 
-# Per-size-class breakdown: shell height, dry weight, number, then the three stats.
+# Per-size-class breakdown: shell height (only when it's used), dry weight,
+# number, then the three stats.
+show_shell = sp.uses_length or dw_src in (OPT_MEAS, OPT_EST)
 show = []
 for e in results:
-    row = {"Shell height (mm)": sig(e["shell_mm"], 3) if e["shell_mm"] is not None else "—"}
+    row = {}
+    if show_shell:
+        row["Shell height (mm)"] = sig(e["shell_mm"], 3) if e["shell_mm"] is not None else "—"
     if not sp.uses_length:
         row["Dry weight (g)"] = sig(e["dtw_g"], 3) if e["dtw_g"] is not None else "—"
     row["Number of bivalves"] = fmt_int(e["count"])
