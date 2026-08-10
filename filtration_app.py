@@ -1,11 +1,10 @@
 """
 TNC Filtration Service Estimator  (Streamlit app)
 
-Companion to AquaPIP. A farmer picks a bivalve species, enters water temperature
-and one or more size classes (shell height and/or dry weight, plus how many
-animals), and gets the estimated maximum volume of water their stock can clear —
-tied to MEL Objective 1.3 (farmed biomass improves light penetration / reduces
-hypoxia).
+Companion to AquaPIP. A farmer picks a bivalve species, enters shell height (one
+size or several size classes with how many animals in each), dry weight, and water
+temperature, and gets the estimated volume of water their stock can clear — tied to
+MEL Objective 1.3 (farmed biomass improves light penetration / reduces hypoxia).
 
 EVERYTHING is read live from ONE workbook so the tool updates the moment the
 science does:  data/Clearance_rate_estimation_tool_TNC.xlsx
@@ -16,7 +15,9 @@ code change (see filtration_logic.py header for the mechanism).
 
 import os
 import glob
+import math
 import streamlit as st
+import pandas as pd
 
 import filtration_logic as fl
 import filtration_report as fr
@@ -33,7 +34,7 @@ PROTOCOL_DIR = os.path.join(HERE, "data", "protocols")
 
 # Set this to your deployed AquaPIP URL to show a cross-link button (leave blank
 # to hide it). e.g. "https://aquapip.streamlit.app"
-AQUAPIP_URL = "https://aquapip-survey.streamlit.app/"
+AQUAPIP_URL = ""
 
 TEAL = "#0B4F5C"
 
@@ -63,6 +64,7 @@ st.markdown(f"""
                 padding:1rem 1.15rem; text-align:center; }}
   .metricbig .num {{ font-family:Georgia,serif; color:{TEAL}; font-size:2.0rem; font-weight:700; line-height:1.1; }}
   .metricbig .lab {{ color:#5B6B70; font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; }}
+  .clslabel {{ padding-top:.55rem; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -115,6 +117,17 @@ def fmt_int(x):
         return f"{int(round(float(x))):,}"
     except (TypeError, ValueError):
         return "—"
+
+
+def _num(x):
+    """Coerce an editor/number value to float or None (handles NaN)."""
+    if x is None:
+        return None
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
 
 
 def conversions_for(species_name):
@@ -221,34 +234,31 @@ with fcol2:
 
 
 # --------------------------------------------------------------------------- #
-# 2 — Water temperature (site-level)
+# 2 — Shell height & how many  (defines the size classes)
 # --------------------------------------------------------------------------- #
-step("2 · Water temperature")
-st.caption("The temperature of the water at your site. Filtration rate changes "
-           "with temperature, so use a value that reflects the period you care about.")
-temp = st.number_input("Water temperature (°C)", min_value=0.0, max_value=40.0,
-                       value=18.0, step=0.5, format="%.1f")
+step("2 · Shell height & how many")
+st.caption("Enter the mean shell height of your bivalves and how many you have. "
+           "Use one size, or split your stock into several size classes.")
 
+size_mode = st.radio("Size entry", ["One shell height", "Several size classes"],
+                     horizontal=True, label_visibility="collapsed")
 
-# --------------------------------------------------------------------------- #
-# 3 — Size classes + dry-weight source
-# --------------------------------------------------------------------------- #
-step("3 · Your bivalves")
-
-sp_slug = fl.norm_species(sp.name).lower().replace(" ", "_")
-convs = conversions_for(sp.name)
-rows_for_calc = []          # list of {shell_mm, count, dtw_g}
-derived_dtw = []            # parallel list of derived DTW (estimate mode) or None
-
-if sp.uses_length:
-    # Length-based equation (e.g. Mytilus edulis): shell height drives CR directly.
-    st.caption("This species' equation uses **shell height** directly, so no dry "
-               "weight is needed. Add a row per size class — the totals are summed.")
-    import pandas as pd
-    seed = pd.DataFrame([{"Shell height (mm)": 50.0, "Number of bivalves": 1000}])
+size_classes = []                       # [{shell_mm, count}, ...]  — source of truth
+if size_mode == "One shell height":
+    c1, c2 = st.columns(2)
+    with c1:
+        _sh = st.number_input("Mean shell height (mm)", min_value=0.0,
+                              max_value=400.0, value=50.0, step=1.0, format="%.1f")
+    with c2:
+        _n = st.number_input("Number of bivalves", min_value=0, value=1000,
+                            step=100, format="%d")
+    size_classes.append({"shell_mm": _num(_sh), "count": _num(_n)})
+else:
+    seed = pd.DataFrame([{"Shell height (mm)": 50.0, "Number of bivalves": 1000},
+                         {"Shell height (mm)": 30.0, "Number of bivalves": 1000}])
     ed = st.data_editor(
         seed, num_rows="dynamic", use_container_width=True, hide_index=True,
-        key=f"sc_{sp_slug}_len",
+        key="sizeclasses",
         column_config={
             "Shell height (mm)": st.column_config.NumberColumn(
                 min_value=0.0, max_value=400.0, step=1.0, format="%.1f"),
@@ -256,107 +266,109 @@ if sp.uses_length:
                 min_value=0, step=100, format="%d"),
         })
     for _, r in ed.iterrows():
-        rows_for_calc.append({"shell_mm": r.get("Shell height (mm)"),
-                              "count": r.get("Number of bivalves"),
-                              "dtw_g": None})
-        derived_dtw.append(None)
+        sm, ct = _num(r.get("Shell height (mm)")), _num(r.get("Number of bivalves"))
+        if sm is None and ct is None:
+            continue
+        size_classes.append({"shell_mm": sm, "count": ct})
 
+if not size_classes:
+    st.info("Add at least one size class to continue.")
+    st.stop()
+
+
+# --------------------------------------------------------------------------- #
+# 3 — Dry weight  (size classes carry over from step 2)
+# --------------------------------------------------------------------------- #
+step("3 · Dry weight")
+
+dtw_list = [None] * len(size_classes)   # dry tissue weight (g) per size class
+
+if sp.uses_length:
+    st.info("Not needed for this species — its filtration is calculated from shell "
+            "height directly, so you can skip straight to temperature.")
 else:
-    # Dry-weight-based equation: choose how dry weight is supplied.
-    opt_one = "Use one dry weight for all"
-    opt_est = "Estimate dry weight from my shell height"
-    opt_meas = "I have my own dry weights by size class (more accurate)"
-    options = [opt_one, opt_meas, opt_est]
+    convs = conversions_for(sp.name)
+    OPT_ONE = "Use one dry weight for all"
+    OPT_MEAS = "I have my own dry weights by size class (more accurate)"
+    OPT_EST = "Estimate dry weight from my shell height"
+    src = st.radio("Dry-weight source", [OPT_ONE, OPT_MEAS, OPT_EST],
+                   label_visibility="collapsed")
+    st.caption("This species' equation uses dry tissue weight (g).")
 
-    st.caption("This species' equation uses **dry tissue weight (g)**. Choose how "
-               "to provide it:")
-    src = st.radio("Dry-weight source", options, label_visibility="collapsed")
-
-    if src == opt_est and not convs:
-        st.warning("No length-weight conversion is available yet for this species, "
-                   "so shell height can't be turned into dry weight. Use *measured "
-                   "dry weights* or *one dry weight for all* for now — conversions "
-                   "will be added as the data become available.")
-
-    import pandas as pd
-
-    if src == opt_one:
+    if src == OPT_ONE:
         st.caption("A single dry tissue weight is applied to every animal. The "
                    "default is a placeholder — enter your own value if you have it.")
-        oc1, oc2 = st.columns(2)
-        with oc1:
-            dtw_one = st.number_input("Dry tissue weight (g)", min_value=0.0,
-                                      value=1.0, step=0.1, format="%.3f")
-        with oc2:
-            n_one = st.number_input("Number of bivalves", min_value=0, value=1000,
-                                    step=100, format="%d")
-        rows_for_calc.append({"shell_mm": None, "count": n_one, "dtw_g": dtw_one})
-        derived_dtw.append(None)
+        dtw_all = st.number_input("Dry tissue weight (g)", min_value=0.0,
+                                  value=1.0, step=0.1, format="%.3f")
+        dtw_list = [dtw_all] * len(size_classes)
 
-    elif src == opt_meas:
-        st.caption("Enter one row per size class with its **measured** dry tissue "
-                   "weight and how many animals are in that class. Rows are summed.")
-        seed = pd.DataFrame([{"Dry weight (g)": 1.0, "Number of bivalves": 1000}])
-        ed = st.data_editor(
-            seed, num_rows="dynamic", use_container_width=True, hide_index=True,
-            key=f"sc_{sp_slug}_meas",
-            column_config={
-                "Dry weight (g)": st.column_config.NumberColumn(
-                    min_value=0.0, step=0.1, format="%.3f"),
-                "Number of bivalves": st.column_config.NumberColumn(
-                    min_value=0, step=100, format="%d"),
-            })
-        for _, r in ed.iterrows():
-            rows_for_calc.append({"shell_mm": None,
-                                  "count": r.get("Number of bivalves"),
-                                  "dtw_g": r.get("Dry weight (g)")})
-            derived_dtw.append(None)
+    elif src == OPT_MEAS:
+        st.caption("Your size classes carry over from above — just add the "
+                   "**measured** dry tissue weight for each.")
+        for i, sc in enumerate(size_classes):
+            cA, cB = st.columns([2, 1])
+            with cA:
+                st.markdown(
+                    f"<div class='v clslabel'><b>Class {i+1}</b> · "
+                    f"{sig(sc['shell_mm'],3)} mm · {fmt_int(sc['count'])} individuals"
+                    f"</div>", unsafe_allow_html=True)
+            with cB:
+                dtw_list[i] = st.number_input(
+                    "Dry weight (g)", min_value=0.0, value=1.0, step=0.1,
+                    format="%.3f", key=f"dtwmeas_{i}", label_visibility="collapsed")
 
-    else:  # estimate from shell height
-        chosen_conv = None
+    else:  # OPT_EST — estimate from shell height using a length-weight conversion
         if convs:
             if len(convs) == 1:
-                chosen_conv = convs[0]
-                st.caption(f"Using conversion: **{chosen_conv.label()}** — "
-                           f"`{chosen_conv.eq_text}`")
+                chosen = convs[0]
+                st.caption(f"Using conversion **{chosen.label()}** — "
+                           f"`{chosen.eq_text}`")
             else:
                 labels = [c.label() for c in convs]
                 pick = st.selectbox("Length-weight conversion to use", labels)
-                chosen_conv = convs[labels.index(pick)]
-                st.caption(f"`{chosen_conv.eq_text}`")
-        st.caption("Enter one row per size class by **shell height**. Dry weight is "
-                   "estimated from the conversion and shown in the results below.")
-        seed = pd.DataFrame([{"Shell height (mm)": 50.0, "Number of bivalves": 1000}])
-        ed = st.data_editor(
-            seed, num_rows="dynamic", use_container_width=True, hide_index=True,
-            key=f"sc_{sp_slug}_est",
-            column_config={
-                "Shell height (mm)": st.column_config.NumberColumn(
-                    min_value=0.0, max_value=400.0, step=1.0, format="%.1f"),
-                "Number of bivalves": st.column_config.NumberColumn(
-                    min_value=0, step=100, format="%d"),
-            })
-        for _, r in ed.iterrows():
-            L = r.get("Shell height (mm)")
-            dtw = None
-            if chosen_conv and L is not None:
-                try:
-                    dtw = chosen_conv.dtw_from_length(L)
-                except fl.ExprError:
-                    dtw = None
-            rows_for_calc.append({"shell_mm": L,
-                                  "count": r.get("Number of bivalves"),
-                                  "dtw_g": dtw})
-            derived_dtw.append(dtw)
+                chosen = convs[labels.index(pick)]
+                st.caption(f"`{chosen.eq_text}`")
+            preview = []
+            for i, sc in enumerate(size_classes):
+                d = None
+                if sc["shell_mm"] is not None:
+                    try:
+                        d = chosen.dtw_from_length(sc["shell_mm"])
+                    except fl.ExprError:
+                        d = None
+                dtw_list[i] = d
+                preview.append({
+                    "Class": i + 1, "Shell height (mm)": sc["shell_mm"],
+                    "Estimated dry weight (g)": round(d, 3) if d is not None else None,
+                    "Number of bivalves": fmt_int(sc["count"])})
+            st.dataframe(pd.DataFrame(preview), use_container_width=True,
+                         hide_index=True)
+        else:
+            st.warning("No length-weight conversion is available yet for this "
+                       "species, so shell height can't be turned into dry weight. "
+                       "Use *measured dry weights* or *one dry weight for all* for "
+                       "now — conversions will be added as data become available.")
+            st.stop()
+
+
+# --------------------------------------------------------------------------- #
+# 4 — Water temperature
+# --------------------------------------------------------------------------- #
+step("4 · Water temperature")
+st.caption("The water temperature at your site. Filtration changes with "
+           "temperature, so use a value for the period you care about.")
+temp = st.number_input("Water temperature (°C)", min_value=0.0, max_value=40.0,
+                       value=18.0, step=0.5, format="%.1f")
 
 
 # --------------------------------------------------------------------------- #
 # Results
 # --------------------------------------------------------------------------- #
+rows_for_calc = [{"shell_mm": sc["shell_mm"], "count": sc["count"],
+                  "dtw_g": dtw_list[i]} for i, sc in enumerate(size_classes)]
 results, totals, notes = fl.compute_rows(sp, temp, rows_for_calc)
 
 step("Estimated water cleared")
-
 m1, m2 = st.columns(2)
 with m1:
     st.markdown(f"<div class='metricbig'><div class='num'>{sig(totals['filt_m3d'],3)}</div>"
@@ -369,22 +381,17 @@ with m2:
 st.caption(f"Total across **{fmt_int(totals['count'])}** animals at "
            f"**{temp:.1f} °C**. This is a best-case maximum (see caveats above).")
 
-# Per-row breakdown table
-import pandas as pd
+# Per-size-class breakdown: shell height, dry weight, number, then the three stats.
 show = []
-for i, e in enumerate(results):
-    row = {}
-    if sp.uses_length:
-        row["Shell height (mm)"] = e["shell_mm"]
-    else:
-        if e.get("dtw_g") is not None:
-            row["Dry weight (g)"] = round(e["dtw_g"], 3)
-        if derived_dtw[i] is not None and not sp.uses_length:
-            row["Shell height (mm)"] = e["shell_mm"]
+for e in results:
+    row = {"Shell height (mm)": sig(e["shell_mm"], 3) if e["shell_mm"] is not None else "—"}
+    if not sp.uses_length:
+        row["Dry weight (g)"] = sig(e["dtw_g"], 3) if e["dtw_g"] is not None else "—"
     row["Number of bivalves"] = fmt_int(e["count"])
-    row["Per animal (L/hr)"] = sig(e["cr_lph"], 3) if e["cr_lph"] is not None else "—"
+    row["Filtration rate (L) per individual per hour"] = (
+        sig(e["cr_lph"], 3) if e["cr_lph"] is not None else "—")
     row["Filtration (L/h)"] = sig(e["filt_lph"], 3) if e["filt_lph"] is not None else "—"
-    row["Filtration (m³/day)"] = sig(e["filt_m3d"], 3) if e["filt_m3d"] is not None else "—"
+    row["Filtration m³/day"] = sig(e["filt_m3d"], 3) if e["filt_m3d"] is not None else "—"
     if e["error"]:
         row["Note"] = e["error"]
     show.append(row)
@@ -397,7 +404,7 @@ for n in notes:
 
 
 # --------------------------------------------------------------------------- #
-# 4 — Dry-weight protocol downloads (greyed until a file is added)
+# Protocols · estimating dry tissue weight (greyed until a file is added)
 # --------------------------------------------------------------------------- #
 step("Protocols · estimating dry tissue weight")
 st.caption("Standardised field/lab protocols for measuring dry tissue weight will "
@@ -419,33 +426,7 @@ else:
 
 
 # --------------------------------------------------------------------------- #
-# 5 — Length-weight conversions library
-# --------------------------------------------------------------------------- #
-step("Length-weight conversions")
-st.caption("Shell height → dry tissue weight conversions in the library. More "
-           "species will be added; each is documented with its location, season "
-           "and source.")
-if CONVS:
-    import pandas as pd
-
-    def _conv_link(c):
-        hits = fl.references_for(c.reference, REFS)
-        return hits[0].link if hits and hits[0].link else ""
-
-    dfc = pd.DataFrame([{
-        "Species": c.species, "Location": c.location, "Season": c.season,
-        "Conversion (mm → g dry weight)": c.eq_text,
-        "Reference": c.reference, "Source": _conv_link(c),
-    } for c in CONVS])
-    st.dataframe(dfc, use_container_width=True, hide_index=True,
-                 column_config={"Source": st.column_config.LinkColumn(
-                     "Source", display_text="open")})
-else:
-    st.info("No length-weight conversions in the library yet.")
-
-
-# --------------------------------------------------------------------------- #
-# 6 — References (download all)
+# References (download all)
 # --------------------------------------------------------------------------- #
 step("References")
 st.caption("Every clearance-rate and length-weight source used by this tool.")
