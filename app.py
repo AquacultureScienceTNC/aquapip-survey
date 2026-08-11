@@ -776,10 +776,13 @@ def _detail(r, covers, keyns="", stacked=False, show_title=False):
 # (so the user never loses survey progress). Hidden until FEEDBACK_URL is set.
 if FEEDBACK_URL:
     st.markdown(
-        f"<div style='text-align:right; margin:-0.6rem 0 0.4rem'>"
-        f"<a href='{FEEDBACK_URL}' target='_blank' rel='noopener' "
-        f"style='color:{TEAL}; font-size:0.85rem; font-weight:600; text-decoration:none'>"
-        f"Questions or feedback? Contact us \u2197</a></div>",
+        f"<style>.aqua-contact{{display:inline-block; background:{TEAL}; color:#fff !important;"
+        f" font-size:0.9rem; font-weight:700; padding:0.5rem 1rem; border-radius:8px;"
+        f" text-decoration:none; box-shadow:0 1px 4px rgba(0,0,0,.18); transition:opacity .15s}}"
+        f" .aqua-contact:hover{{opacity:.85}}</style>"
+        f"<div style='text-align:right; margin:-0.3rem 0 0.6rem'>"
+        f"<a class='aqua-contact' href='{FEEDBACK_URL}' target='_blank' rel='noopener'>"
+        f"\U0001F4AC  Questions or feedback?</a></div>",
         unsafe_allow_html=True)
 
 v = st.session_state.view
