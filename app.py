@@ -42,7 +42,7 @@ CONSENT_TEXT = ("You can store my responses. Your responses will only be used fo
 
 # Paste your Google Form's shareable link between the quotes (see README / setup notes).
 # Leave it "" and no contact link appears. Example: "https://forms.gle/AbC123..."
-FEEDBACK_URL = "https://forms.cloud.microsoft/r/ZWiRGP4te4"
+FEEDBACK_URL = "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=wW2-eY7Xu0uyK9mUwKQXp6WdY3q1w15BvDRlgn30McZURVlVWEtVV1I3MlZZRUoxQlFRVDZUTzBBTS4u"
 
 st.markdown(f"""
 <style>
