@@ -40,6 +40,10 @@ CONSENT_TEXT = ("You can store my responses. Your responses will only be used fo
                 "internal tracking purposes, and not for any other uses unless "
                 "explicitly authorized in writing by you.")
 
+# Paste your Google Form's shareable link between the quotes (see README / setup notes).
+# Leave it "" and no contact link appears. Example: "https://forms.gle/AbC123..."
+FEEDBACK_URL = ""
+
 st.markdown(f"""
 <style>
   .block-container {{ padding-top: 2rem; padding-bottom: 3rem; max-width: 1150px; }}
@@ -768,6 +772,16 @@ def _detail(r, covers, keyns="", stacked=False, show_title=False):
 # --------------------------------------------------------------------------- #
 # Router
 # --------------------------------------------------------------------------- #
+# Persistent contact / feedback link — shows on every page, opens in a new tab
+# (so the user never loses survey progress). Hidden until FEEDBACK_URL is set.
+if FEEDBACK_URL:
+    st.markdown(
+        f"<div style='text-align:right; margin:-0.6rem 0 0.4rem'>"
+        f"<a href='{FEEDBACK_URL}' target='_blank' rel='noopener' "
+        f"style='color:{TEAL}; font-size:0.85rem; font-weight:600; text-decoration:none'>"
+        f"Questions or feedback? Contact us \u2197</a></div>",
+        unsafe_allow_html=True)
+
 v = st.session_state.view
 if v == "survey":
     render_survey()
