@@ -37,6 +37,10 @@ PROTOCOL_DIR = os.path.join(HERE, "data", "protocols")
 # to hide it). e.g. "https://aquapip.streamlit.app"
 AQUAPIP_URL = ""
 
+# Set this to a contact / data-sharing form URL (e.g. the same Microsoft Form you
+# use for AquaPIP) to show a "Get in touch" button at the bottom. Blank = hidden.
+CONTACT_URL = ""
+
 TEAL = "#0B4F5C"
 
 # Same visual language as AquaPIP (app.py), plus a caveat card + metric styles.
@@ -61,6 +65,10 @@ st.markdown(f"""
              border-radius:0 10px 10px 0; padding:.75rem 1rem; margin:.6rem 0; }}
   .caveat .hd {{ color:#8A5A00; font-weight:700; font-family:Georgia,serif; margin-bottom:.25rem; }}
   .caveat p {{ color:#5B4a1f; font-size:.9rem; margin:.15rem 0; }}
+  .restore {{ background:#EAF1F4; border:1px solid #C4D6DE; border-left:5px solid {TEAL};
+              border-radius:0 10px 10px 0; padding:.75rem 1rem; margin:.6rem 0; }}
+  .restore .hd {{ color:{TEAL}; font-weight:700; font-family:Georgia,serif; margin-bottom:.25rem; }}
+  .restore p {{ color:#274B54; font-size:.9rem; margin:.15rem 0; }}
   .metricbig {{ background:#EAF3F1; border:1px solid #CFE4DE; border-radius:12px;
                 padding:1rem 1.15rem; text-align:center; }}
   .metricbig .num {{ font-family:Georgia,serif; color:{TEAL}; font-size:2.0rem; font-weight:700; line-height:1.1; }}
@@ -87,7 +95,6 @@ bundle = get_bundle(os.path.getmtime(WB_PATH))
 SPECIES = bundle["species"]
 CONVS = bundle["conversions"]
 REFS = bundle["references"]
-HOWTO = bundle["howto"]
 
 
 # --------------------------------------------------------------------------- #
@@ -166,25 +173,66 @@ with hcols[1]:
         st.link_button("↩ Back to AquaPIP", AQUAPIP_URL, use_container_width=True)
 st.divider()
 
-# Intro (live from the workbook's "How to use" sheet)
-if HOWTO["intro"]:
-    st.markdown("<div class='learnbox'>" +
-                "".join(f"<div class='v' style='margin:.15rem 0'>{t}</div>"
-                        for t in HOWTO["intro"]) + "</div>",
-                unsafe_allow_html=True)
+# Welcome / what this tool is (fixed framing — not workbook-driven, so it stays
+# correct and is never lost when the data workbook is updated).
+st.markdown(
+    "<div class='learnbox'>"
+    "<div class='v' style='margin:.15rem 0'><b>Welcome to the TNC Filtration "
+    "Services estimator tool.</b></div>"
+    "<div class='v' style='margin:.35rem 0'>This tool is designed to allow growers "
+    "to approximate the potential maximum volume of water cleared by the bivalves "
+    "being grown on site. It brings together existing published data and "
+    "calculations of size-specific filtration rates to make general estimations "
+    "about the filtration capacity of stock held (biomass) on a farm at any point "
+    "in time. It does not value the effect of water filtration on the broader "
+    "ecosystem, rather it guides a general understanding of the process of "
+    "filtration that contributes to a range of ecosystem services such as "
+    "improving/reducing suspended matter and regulating phytoplankton.</div>"
+    "</div>",
+    unsafe_allow_html=True)
 
-# How-to steps (live) in an expander
-if HOWTO["steps"]:
-    with st.expander("How to use this tool"):
-        for i, s in enumerate(HOWTO["steps"], 1):
-            st.markdown(f"{i}. {s}")
-
-# Caveats — always visible, prominent (live from the workbook)
-if HOWTO["caveats"]:
+# How to use (web tool steps)
+with st.expander("How to use this tool"):
     st.markdown(
-        "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>" +
-        "".join(f"<p>{c}</p>" for c in HOWTO["caveats"]) + "</div>",
-        unsafe_allow_html=True)
+        "1. **Choose your species.**\n"
+        "2. **Enter shell height** — one size, or several size classes with how "
+        "many animals are in each.\n"
+        "3. **Enter dry weight** — use your own measured weights, estimate them "
+        "from shell height where a conversion exists, or apply one value to all. "
+        "(Not needed for species whose filtration is calculated from shell height "
+        "directly.)\n"
+        "4. **Enter your water temperature.**\n"
+        "5. Read the **estimated filtration** per size class and the totals.")
+
+# Caveats — always visible, prominent
+st.markdown(
+    "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>"
+    "<p>There are a number of caveats as to how the \"volume of water cleared\" "
+    "should be interpreted. Please be mindful of the fact that these estimates are "
+    "a best-case scenario derived on water temperature and bivalve size alone, and "
+    "do not account for: particle size, salinity, particulate matter concentration, "
+    "water flow rate, pollutant concentrations, or diurnal variability — all of "
+    "which may negatively affect the clearance rate. Furthermore, this tool does "
+    "not account for re-filtration of water, and assumes a perfectly mixed water "
+    "column.</p>"
+    "<p>The calculations often draw on and are extrapolated from one or a small "
+    "number of published studies. This limits the confidence in the calculations, "
+    "but also represents a valuable area for species-specific and farm-based "
+    "research. If you have data that may inform this tool, please reach out to us "
+    "using the contact form at the bottom of the page.</p>"
+    "</div>",
+    unsafe_allow_html=True)
+
+# Farm-based services vs. restoration — distinct box
+st.markdown(
+    "<div class='restore'><div class='hd'>Farm filtration is not a substitute for "
+    "wild and restored bivalves</div>"
+    "<p>It is important to recognise that water filtration supported by an "
+    "aquaculture farm is not a replacement for the benefits that wild and restored "
+    "bivalve communities provide. Protecting and enhancing bivalve populations in "
+    "the wild remains the critical pathway to support filtration in marine "
+    "ecosystems.</p></div>",
+    unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -533,6 +581,20 @@ with st.expander(f"View all {len(REFS)} references"):
         if r.link:
             line += f"  \n[{r.link}]({r.link})"
         st.markdown(line)
+
+
+# --------------------------------------------------------------------------- #
+# Contact / share data
+# --------------------------------------------------------------------------- #
+step("Get in touch")
+st.caption("Have data that could improve this tool, or a question? We'd love to "
+           "hear from you — species-specific and farm-based measurements are a "
+           "valuable area for research.")
+if CONTACT_URL:
+    st.link_button("✉  Contact us / share your data", CONTACT_URL)
+else:
+    st.info("A contact form will be linked here. (Set CONTACT_URL near the top of "
+            "filtration_app.py — e.g. the same Microsoft Form used for AquaPIP.)")
 
 st.divider()
 st.caption("Source: TNC Filtration Service Estimator workbook "
