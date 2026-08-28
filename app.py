@@ -395,6 +395,16 @@ def render_learn_indicators():
                 f"The indicators you selected are highlighted; the rest are greyed so you can see them "
                 f"in context.</p></div>", unsafe_allow_html=True)
 
+    st.markdown(
+        "<div class='learnbox' style='margin:.1rem 0 1rem'>"
+        "<b>This page is just for review \u2014 there's nothing to fill in here.</b> "
+        "Each column is one indicator you could monitor; read <i>down</i> a column to see its goal, "
+        "objective, method, timing and more. The indicators you picked are shown in colour; the rest "
+        "are greyed. If a greyed-out one is something you'd actually like to measure, use "
+        "<b>\u2190 Return to survey</b> above to add it before you continue. When your selection looks "
+        "right, move on \u2014 the next pages turn these into concrete, ready-to-run protocols."
+        "</div>", unsafe_allow_html=True)
+
     fields = [("Goal", "goal"), ("Objective", "objective"), ("Indicator", "measured"),
               ("Complexity", "complexity"), ("Metric", "metric"), ("Suggested method", "method"),
               ("Proxy / additional method", "proxy"), ("Frequency / timing", "frequency"),
@@ -402,13 +412,18 @@ def render_learn_indicators():
 
     def matrix(area, inds):
         color = AREA_COLOR.get(area, TEAL)
+        SEP = "#C2CBCE"   # medium-grey column separator
 
         def cstyle(sel):
-            return (f"background:#fff;color:#1A2B2F;border-top:3px solid {color};"
-                    if sel else "background:#F5F6F7;color:#9AA5A8;border-top:3px solid #E4E8E9;")
+            return ("background:#fff;color:#1A2B2F;" if sel
+                    else "background:#F5F6F7;color:#9AA5A8;")
+
+        def vsep(sel):    # vertical column separators: grey throughout; colour frames selected columns
+            return (f"border-left:3px solid {color};border-right:3px solid {color};" if sel
+                    else f"border-right:2px solid {SEP};")
 
         head = (f"<td style='min-width:118px;background:{color};color:#fff;font-weight:700;"
-                f"padding:.45rem .55rem;vertical-align:bottom'>{area}</td>")
+                f"padding:.45rem .55rem;vertical-align:bottom;border-right:2px solid {SEP}'>{area}</td>")
         for ind in inds:
             sel = ind["code"] in selected_codes
             name = ind.get("name") or ind["label"]
@@ -417,17 +432,18 @@ def render_learn_indicators():
                         f"padding:.2rem .5rem;border-radius:6px;display:inline-block'>{name}</span>")
             else:
                 chip = f"<span style='color:#9AA5A8;font-weight:600;font-size:.84rem'>{name}</span>"
-            head += (f"<td style='{cstyle(sel)}min-width:158px;padding:.5rem .55rem;vertical-align:bottom'>"
-                     f"{chip}</td>")
+            cap = f"border-top:4px solid {color if sel else '#E4E8E9'};"   # coloured/grey column cap
+            head += (f"<td style='{cstyle(sel)}{vsep(sel)}{cap}min-width:158px;padding:.5rem .55rem;"
+                     f"vertical-align:bottom'>{chip}</td>")
         rows_html = f"<tr>{head}</tr>"
-        for flabel, fkey in fields:
+        for flabel, fkey in fields:   # one row per field; no horizontal lines between rows
             cells = (f"<td style='background:#EEF3F4;color:#33474C;font-weight:700;font-size:.66rem;"
                      f"text-transform:uppercase;letter-spacing:.02em;padding:.35rem .55rem;"
-                     f"vertical-align:top;white-space:nowrap'>{flabel}</td>")
+                     f"vertical-align:top;white-space:nowrap;border-right:2px solid {SEP}'>{flabel}</td>")
             for ind in inds:
                 sel = ind["code"] in selected_codes
                 val = ind.get(fkey) or "\u2014"
-                cells += (f"<td style='{cstyle(sel)}padding:.35rem .55rem;vertical-align:top;"
+                cells += (f"<td style='{cstyle(sel)}{vsep(sel)}padding:.35rem .55rem;vertical-align:top;"
                           f"font-size:.78rem;line-height:1.3'>{val}</td>")
             rows_html += f"<tr>{cells}</tr>"
         return (f"<div style='overflow-x:auto;border:1px solid #E1E7E9;border-radius:10px;"
@@ -562,13 +578,15 @@ def render_results():
         st.session_state.view = "survey"; st.rerun(); return
     code2label = sub.get("code2label", {})
 
-    top = st.columns([3, 1])
+    top = st.columns([3, 1.4])
     with top[0]:
         farm = sub.get("farm_name") or "Your farm"
         st.markdown(f"<div class='hero'><h1>Your MEL Protocol Recommendations</h1>"
                     f"<p>{farm} \u00b7 {sub['aqua_type']} \u00b7 one best practitioner-runnable protocol "
                     f"per selected indicator.</p></div>", unsafe_allow_html=True)
     with top[1]:
+        if st.button("<-  Understanding recommendations", use_container_width=True):
+            st.session_state.view = "learn_classes"; st.rerun()
         if st.button("<-  Edit answers", use_container_width=True):
             st.session_state.view = "survey"; st.rerun()
 
