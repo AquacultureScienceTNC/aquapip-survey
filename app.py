@@ -135,7 +135,7 @@ def _persist_save():
 def _reset_survey():
     """Clear all survey answers for a fresh start (Start-over button)."""
     keys = (PERSIST_KEYS + ["_keep_" + k for k in PERSIST_KEYS]
-            + ["_prev_aqua", "_prev_fg", "prof_algae_na", "p1",
+            + ["_prev_aqua", "_prev_fg", "prof_algae_na", "p1", "seen_results",
                "submission", "primary_override", "_save_status", "monitoring_sel"])
     for k in keys:
         st.session_state.pop(k, None)
@@ -143,6 +143,16 @@ def _reset_survey():
         if k.startswith("mon_") or k.startswith("_keep_mon_"):
             st.session_state.pop(k, None)
     st.session_state["view"] = "survey"
+
+
+def _reco_jump_button(key):
+    """Top-of-page 'Back to Recommendations' button. Shown only once the user has
+    reached the results page at least once (seen_results). Returns True when
+    clicked. On the survey/monitoring pages the caller rebuilds the submission
+    from current inputs before jumping, so edits are always reflected."""
+    if not st.session_state.get("seen_results"):
+        return False
+    return st.button("\u21a9  Back to Recommendations", key=key, use_container_width=True)
 
 
 def indicator_card(ind):
@@ -168,6 +178,7 @@ def indicator_card(ind):
 # --------------------------------------------------------------------------- #
 def render_survey():
     _persist_restore()
+    _jump = _reco_jump_button("jump_survey")
     st.markdown("<div class='hero'><h1>Regenerative Aquaculture - MEL Monitoring Survey</h1>"
                 "<p>Tell us about your farm and what you'd like to measure. We'll match you to "
                 "monitoring protocols from the TNC MEL evidence base - with the most farmer-friendly "
@@ -281,6 +292,10 @@ def render_survey():
                 codes.append(it["code"])
     st.caption(f"**{len(codes)}** indicator(s) selected.")
 
+    p1 = {"farm_name": (farm_name or "").strip(), "aqua_type": aqua,
+          "farmer_goals": list(fg), "codes": codes, "profile": profile,
+          "goals": ml.goals_from_codes(codes), "code2label": code2label}
+
     bcol = st.columns([2, 1])
     with bcol[0]:
         go = st.button("Next: what you already monitor  ->", type="primary", use_container_width=True)
@@ -290,15 +305,17 @@ def render_survey():
 
     _persist_save()   # capture every answer before navigating away from the survey
 
-    if go:
+    if go or _jump:
         if not codes:
             st.warning("Please select at least one indicator (or pick a goal in step 2 to pre-fill them).")
         else:
-            st.session_state["p1"] = {
-                "farm_name": (farm_name or "").strip(), "aqua_type": aqua,
-                "farmer_goals": list(fg), "codes": codes, "profile": profile,
-                "goals": ml.goals_from_codes(codes), "code2label": code2label}
-            st.session_state["view"] = "monitoring"
+            st.session_state["p1"] = p1
+            if _jump:   # straight back to results, keeping monitoring answers, reflecting these edits
+                prev = st.session_state.get("submission", {})
+                st.session_state["submission"] = {**prev, **p1}
+                st.session_state["view"] = "results"
+            else:
+                st.session_state["view"] = "monitoring"
             st.rerun()
 
 
@@ -310,6 +327,7 @@ def render_monitoring():
     p1 = st.session_state.get("p1")
     if not p1:                       # reached without completing page 1
         st.session_state["view"] = "survey"; st.rerun(); return
+    _jump = _reco_jump_button("jump_monitoring")
 
     st.markdown(
         "<div class='hero'><h1>What are you already monitoring?</h1>"
@@ -360,7 +378,7 @@ def render_monitoring():
 
     if back:
         st.session_state["view"] = "survey"; st.rerun()
-    if go:
+    if go or _jump:
         sub = dict(p1)
         sub.update({"gps": gps.strip(), "contact_name": cname.strip(),
                     "contact_info": cinfo.strip(), "consent": bool(consent),
@@ -368,7 +386,7 @@ def render_monitoring():
         st.session_state["submission"] = sub
         st.session_state["_save_status"] = (
             storage.save_response(sub) if consent else (None, "no_consent"))
-        st.session_state["view"] = "learn_indicators"
+        st.session_state["view"] = "results" if _jump else "learn_indicators"
         st.rerun()
 
 
@@ -389,6 +407,8 @@ def render_learn_indicators():
     with nav[1]:
         if st.button("Ready to continue?  ->", type="primary", use_container_width=True):
             st.session_state.view = "learn_classes"; st.rerun()
+    if _reco_jump_button("jump_learn_ind"):
+        st.session_state.view = "results"; st.rerun()
 
     st.markdown(f"<div class='hero'><h1>Your MEL indicators</h1>"
                 f"<p>The full MEL indicator set for a <b>{aqua}</b> farm, laid out as in the framework. "
@@ -485,6 +505,8 @@ def render_learn_classes():
     with nav[1]:
         if st.button("See my recommendations  ->", type="primary", use_container_width=True):
             st.session_state.view = "results"; st.rerun()
+    if _reco_jump_button("jump_learn_cls"):
+        st.session_state.view = "results"; st.rerun()
 
     st.markdown("<div class='hero'><h1>Understanding our protocol recommendations</h1>"
                 "<p>A quick guide to the labels you'll see on the next page.</p></div>",
@@ -576,6 +598,7 @@ def render_results():
     sub = st.session_state.get("submission")
     if not sub:
         st.session_state.view = "survey"; st.rerun(); return
+    st.session_state["seen_results"] = True   # enables the "Back to Recommendations" button on every page
     code2label = sub.get("code2label", {})
 
     top = st.columns([3, 1.4])
