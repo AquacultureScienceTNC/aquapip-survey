@@ -107,7 +107,7 @@ def dots(o):
 
 
 # widget keys whose values must survive leaving and returning to the survey view
-PERSIST_KEYS = ["aqua_type", "clicked_goals", "farm_name_input",
+PERSIST_KEYS = ["aqua_type", "goal_sel", "farm_name_input",
                 "prof_species", "prof_algae", "prof_farm_structure", "prof_farm_scale",
                 "prof_coculture", "prof_climate_zone", "prof_site_depth",
                 "prof_wave_energy", "prof_water_clarity",
@@ -135,7 +135,7 @@ def _persist_save():
 def _reset_survey():
     """Clear all survey answers for a fresh start (Start-over button)."""
     keys = (PERSIST_KEYS + ["_keep_" + k for k in PERSIST_KEYS]
-            + ["_prev_aqua", "_prev_fg", "prof_algae_na", "p1", "seen_results",
+            + ["_prev_aqua", "_prev_goal_sel", "prof_algae_na", "p1", "seen_results",
                "finalized", "final_dropped",
                "submission", "primary_override", "_save_status", "monitoring_sel"])
     for k in keys:
@@ -211,6 +211,8 @@ def render_survey():
         st.session_state["prof_species"] = "- any -"
         st.session_state["prof_farm_structure"] = "- any -"
         st.session_state["clicked_goals"] = []
+        st.session_state["goal_sel"] = []
+        st.session_state["_prev_goal_sel"] = []
         for k in GROUP_KEYS.values():
             st.session_state[k] = []
 
@@ -223,27 +225,28 @@ def render_survey():
         if st.session_state.get("seen_results"):
             _jump = st.button("\u21a9  Back to Recommendations", key="jump_survey",
                               use_container_width=True)
-    st.caption("Tap a goal to add its indicators, then toggle any on or off below \u2014 or pick "
-               "indicators directly. Everything relevant to your farm is shown.")
-
-    clicked_goals = st.session_state.setdefault("clicked_goals", [])
-    goal_names = list(ml.FARMER_GOALS.keys())
-    gcols = st.columns(2)
-    for i, g in enumerate(goal_names):
-        with gcols[i % 2]:
-            if st.button(f"+  {g}", key=f"goalbtn_{i}", use_container_width=True):
-                derived = ml.codes_for_farmer_goals([g], available_codes)
-                for area, key in GROUP_KEYS.items():
-                    cur = list(st.session_state.get(key, []) or [])
-                    for c in derived:
-                        if code2goal.get(c) == area and code2label[c] not in cur:
-                            cur.append(code2label[c])
-                    st.session_state[key] = cur
-                if g not in clicked_goals:
-                    clicked_goals.append(g); st.session_state["clicked_goals"] = clicked_goals
-                st.rerun()
+    st.caption("Tap a goal to light it up and add its indicators, then toggle any on or off below "
+               "\u2014 or pick indicators directly. Everything relevant to your farm is shown.")
 
     _use_pills = hasattr(st, "pills")
+    goal_names = list(ml.FARMER_GOALS.keys())
+    if _use_pills:
+        st.pills("Goals", goal_names, selection_mode="multi", key="goal_sel",
+                 label_visibility="collapsed")
+    else:
+        st.multiselect("Goals", goal_names, key="goal_sel",
+                       label_visibility="collapsed", placeholder="Choose one or more goals...")
+    sel_goals = st.session_state.get("goal_sel", []) or []
+    prev_goals = st.session_state.get("_prev_goal_sel", [])
+    for g in [x for x in sel_goals if x not in prev_goals]:   # a newly lit goal ADDS its indicators
+        for c in ml.codes_for_farmer_goals([g], available_codes):
+            key = GROUP_KEYS.get(code2goal.get(c))
+            if key:
+                cur = list(st.session_state.get(key, []) or [])
+                if code2label[c] not in cur:
+                    cur.append(code2label[c]); st.session_state[key] = cur
+    if sel_goals != prev_goals:
+        st.session_state["_prev_goal_sel"] = list(sel_goals)
     for area in ORDER:
         inds = ind_groups[area]
         if not inds:
@@ -312,7 +315,7 @@ def render_survey():
                 profile[fkey] = v
 
     p1 = {"farm_name": (farm_name or "").strip(), "aqua_type": aqua,
-          "farmer_goals": list(clicked_goals), "codes": codes, "profile": profile,
+          "farmer_goals": list(sel_goals), "codes": codes, "profile": profile,
           "goals": ml.goals_from_codes(codes), "code2label": code2label}
 
     bcol = st.columns([2, 1])
@@ -660,17 +663,42 @@ def _render_finalized(sub, matches, code2label):
         st.info("You've dropped every protocol. Use \u201cRevise selection\u201d to bring the options back.")
         return
 
+    # group + colour by MEL area, exactly like the framework
+    ig = ml.sector_indicator_groups(ref, sub["aqua_type"])
+    _, _, code2goal = ml.flatten_options(ig)
+    ORDER = ["Habitat & Biodiversity", "Water Quality", "Climate Change"]
+
     st.caption(f"{len(chosen)} protocol(s) selected.")
-    for code, c in chosen:
-        r = c["row"]; label = code2label.get(code, code)
-        with st.expander(f"MEL Indicator: {label}    \u00b7    Protocol: {r['display_title']}"):
+    for area in ORDER:
+        area_items = [(code, c) for code, c in chosen if code2goal.get(code) == area]
+        if not area_items:
+            continue
+        color = AREA_COLOR[area]
+        st.markdown(f"<div style='background:{color};color:#fff;font-weight:700;font-size:.95rem;"
+                    f"padding:.4rem .8rem;border-radius:7px;margin:1rem 0 .5rem'>{area}</div>",
+                    unsafe_allow_html=True)
+        for code, c in area_items:
+            r = c["row"]; label = code2label.get(code, code)
+            fit = "<span class='fit'>\u2605 fits your farm</span>" if c.get("badge") else ""
+            mon_cov = c.get("mon_covered") or []
+            mon_chip = ("<span class='fit' style='background:#3E7CB1;margin-left:.3rem'>"
+                        "\u2713 builds on your monitoring: " + ", ".join(mon_cov)
+                        + "</span>") if mon_cov else ""
             st.markdown(
+                f"<div class='proto' style='border-left-color:{color}'>"
+                f"<div style='color:{color};font-weight:700;font-size:.85rem'>"
+                f"MEL Indicator: {label} {fit}{mon_chip}</div>"
+                f"<div style='font-weight:700;color:#1A2B2F;margin:.15rem 0 .35rem'>"
+                f"Protocol: {r['display_title']}</div>"
                 f"<span class='pill' style='background:{r['tier_color']}'>T{r['tier']} \u00b7 {r['tier_label']}</span>"
                 f"<span class='tag'>Skill: {r['skill']}</span>"
                 f"<span class='tag'>Cost {dots(r['cost_ord'])}</span>"
-                f"<span class='tag'>Effort {dots(r['effort_ord'])}</span>", unsafe_allow_html=True)
-            _detail(r, [label], keyns=f"final{code}", stacked=True, show_title=False)
-            if st.button(f"Remove \u201c{label}\u201d from my selection", key=f"drop_{code}"):
+                f"<span class='tag'>Effort {dots(r['effort_ord'])}</span></div>",
+                unsafe_allow_html=True)
+            with st.expander("View full details"):
+                _detail(r, [label], keyns=f"final{code}", stacked=True, show_title=False)
+            if st.button(f"I don't want to monitor this indicator right now \u2014 remove {label}",
+                         key=f"drop_{code}"):
                 dropped.add(code); st.session_state["final_dropped"] = dropped; st.rerun()
 
     st.divider()

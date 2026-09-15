@@ -115,7 +115,7 @@ FARMER_GOALS = OrderedDict([
     ("Fisheries support & benefits", {
         "blurb": ("Habitat provision and biodiversity that support wild fish and "
                   "mobile fauna around the farm."),
-        "codes": ["H&B 1.1.1", "H&B 1.2.1", "H&B 2.1.1", "H&B 2.2.1"],
+        "codes": ["H&B 1.1.1", "H&B 1.2.1", "H&B 2.1.1", "H&B 2.2.1", "H&B 3.1.1"],
     }),
     ("Water Quality", {
         "blurb": ("Nutrient extraction, dissolved oxygen, chlorophyll-a and "
