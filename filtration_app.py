@@ -157,6 +157,35 @@ def protocol_files():
     return out
 
 
+def dry_weight_protocol():
+    """The dry-tissue-weight protocol file, if one has been added. Prefers a file
+    whose name mentions 'dry'/'weight'; otherwise the first protocol file."""
+    files = protocol_files()
+    if not files:
+        return None
+    for p in files:
+        b = os.path.basename(p).lower()
+        if "dry" in b or "weight" in b or "dtw" in b:
+            return p
+    return files[0]
+
+
+def dry_weight_protocol_button(key):
+    """Render the dry-weight protocol download — a working button if the file is
+    present, otherwise a greyed-out 'coming soon' button. `key` keeps Streamlit
+    widgets unique across the places this is shown."""
+    p = dry_weight_protocol()
+    if p:
+        with open(p, "rb") as fh:
+            st.download_button(f"📄 Download dry-weight protocol ({os.path.basename(p)})",
+                               data=fh.read(), file_name=os.path.basename(p),
+                               key=key)
+    else:
+        st.button("📄 Dry-weight protocol (coming soon)", disabled=True, key=key,
+                  help="Not yet available — drop the protocol PDF into "
+                       "data/protocols/ in the repo and it will activate here.")
+
+
 # --------------------------------------------------------------------------- #
 # Header
 # --------------------------------------------------------------------------- #
@@ -203,36 +232,6 @@ with st.expander("How to use this tool"):
         "directly.)\n"
         "4. **Enter your water temperature.**\n"
         "5. Read the **estimated filtration** per size class and the totals.")
-
-# Caveats — always visible, prominent
-st.markdown(
-    "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>"
-    "<p>There are a number of caveats as to how the \"volume of water cleared\" "
-    "should be interpreted. Please be mindful of the fact that these estimates are "
-    "a best-case scenario derived on water temperature and bivalve size alone, and "
-    "do not account for: particle size, salinity, particulate matter concentration, "
-    "water flow rate, pollutant concentrations, or diurnal variability — all of "
-    "which may negatively affect the clearance rate. Furthermore, this tool does "
-    "not account for re-filtration of water, and assumes a perfectly mixed water "
-    "column.</p>"
-    "<p>The calculations often draw on and are extrapolated from one or a small "
-    "number of published studies. This limits the confidence in the calculations, "
-    "but also represents a valuable area for species-specific and farm-based "
-    "research. If you have data that may inform this tool, please reach out to us "
-    "using the contact form at the bottom of the page.</p>"
-    "</div>",
-    unsafe_allow_html=True)
-
-# Farm-based services vs. restoration — distinct box
-st.markdown(
-    "<div class='restore'><div class='hd'>Farm filtration is not a substitute for "
-    "wild and restored bivalves</div>"
-    "<p>It is important to recognise that water filtration supported by an "
-    "aquaculture farm is not a replacement for the benefits that wild and restored "
-    "bivalve communities provide. Protecting and enhancing bivalve populations in "
-    "the wild remains the critical pathway to support filtration in marine "
-    "ecosystems.</p></div>",
-    unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,8 +283,8 @@ with fcol2:
 
 # Dry-weight source options — defined here so Step 2 can react to the choice the
 # farmer makes in Step 3 (Streamlit persists the radio via its key across reruns).
-OPT_ONE = "Use one dry weight for all"
-OPT_MEAS = "I have my own dry weights by size class (more accurate)"
+OPT_ONE = "Use average dry weight — download the protocol below for the correct way to obtain it"
+OPT_MEAS = "Use dry weight by size class — download the protocol below for the correct way to obtain it"
 OPT_EST = "Estimate dry weight from my shell height"
 _dw_src_prev = st.session_state.get("dwsrc", OPT_ONE)
 # Shell height plays no part in a dry-weight species' clearance-rate formula when a
@@ -365,15 +364,19 @@ else:
     st.caption("This species' equation uses dry tissue weight (g).")
 
     if src == OPT_ONE:
-        st.caption("A single dry tissue weight is applied to every animal. The "
-                   "default is a placeholder — enter your own value if you have it.")
-        dtw_all = st.number_input("Dry tissue weight (g)", min_value=0.0,
+        st.caption("A single average dry tissue weight is applied to every animal. "
+                   "The default is a placeholder — enter your own value if you have "
+                   "it. Use the protocol below for the correct way to measure it.")
+        dry_weight_protocol_button("proto_one")
+        dtw_all = st.number_input("Average dry tissue weight (g)", min_value=0.0,
                                   value=1.0, step=0.1, format="%.3f")
         dtw_list = [dtw_all] * len(size_classes)
 
     elif src == OPT_MEAS:
-        st.caption("Your size classes carry over from above — just add the "
-                   "**measured** dry tissue weight for each.")
+        st.caption("Enter a measured dry tissue weight for each size class carried "
+                   "over from above. Use the protocol below for the correct way to "
+                   "measure it.")
+        dry_weight_protocol_button("proto_meas")
         for i, sc in enumerate(size_classes):
             cA, cB = st.columns([2, 1])
             with cA:
@@ -504,7 +507,7 @@ with m2:
                 f"<div class='lab'>litres per hour (L/h)</div></div>",
                 unsafe_allow_html=True)
 st.caption(f"Total across **{fmt_int(totals['count'])}** animals at "
-           f"**{temp:.1f} °C**. This is a best-case maximum (see caveats above).")
+           f"**{temp:.1f} °C**. This is a best-case maximum (see caveats below).")
 
 # Per-size-class breakdown: shell height (only when it's used), dry weight,
 # number, then the three stats.
@@ -533,25 +536,37 @@ for n in notes:
 
 
 # --------------------------------------------------------------------------- #
-# Protocols · estimating dry tissue weight (greyed until a file is added)
+# Caveats + farm-vs-restoration note — shown here, after the person has entered
+# their data and seen the estimate.
 # --------------------------------------------------------------------------- #
-step("Protocols · estimating dry tissue weight")
-st.caption("Standardised field/lab protocols for measuring dry tissue weight will "
-           "appear here for download once added.")
-pfiles = protocol_files()
-if pfiles:
-    pcols = st.columns(min(3, len(pfiles)))
-    for i, p in enumerate(pfiles):
-        with pcols[i % len(pcols)]:
-            with open(p, "rb") as fh:
-                st.download_button(f"⬇ {os.path.basename(p)}", data=fh.read(),
-                                   file_name=os.path.basename(p),
-                                   use_container_width=True, key=f"proto_{i}")
-else:
-    st.button("Dry-weight protocol (coming soon)", disabled=True,
-              use_container_width=False,
-              help="Not yet available — drop a protocol file into data/protocols/ "
-                   "in the repo and it will appear here automatically.")
+st.markdown(
+    "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>"
+    "<p>There are a number of caveats as to how the \"volume of water cleared\" "
+    "should be interpreted. Please be mindful of the fact that these estimates are "
+    "a best-case scenario derived on water temperature and bivalve size alone, and "
+    "do not account for: particle size, salinity, particulate matter concentration, "
+    "water flow rate, pollutant concentrations, or diurnal variability — all of "
+    "which may negatively affect the clearance rate. Furthermore, this tool does "
+    "not account for re-filtration of water, and assumes a perfectly mixed water "
+    "column.</p>"
+    "<p>The calculations often draw on and are extrapolated from one or a small "
+    "number of published studies. This limits the confidence in the calculations, "
+    "but also represents a valuable area for species-specific and farm-based "
+    "research. If you have data that may inform this tool, please reach out to us "
+    "using the contact form at the bottom of the page.</p>"
+    "</div>",
+    unsafe_allow_html=True)
+
+st.markdown(
+    "<div class='restore'><div class='hd'>Farm filtration is not equivalent to "
+    "wild and restored bivalves</div>"
+    "<p>It is important to recognise that ecosystem services supported by an "
+    "aquaculture farm are not directly equivalent to those provided by wild and "
+    "restored bivalve communities (Munroe et al. 2026, Lefcheck et al. 2021, "
+    "Lunstrum et al. 2018). Protecting and enhancing bivalve populations in the "
+    "wild remains the critical pathway to support filtration in marine "
+    "ecosystems.</p></div>",
+    unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
