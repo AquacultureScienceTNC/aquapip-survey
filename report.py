@@ -340,8 +340,8 @@ def _detail_block(rec, codes, n_alt, code2label, S, name_map=None, mon_covered=N
     mon_covered = mon_covered or []
     parts = []
     code_str = " · ".join(code2label.get(c, c) for c in codes)
-    parts.append(Paragraph(code_str, S["code"]))
-    parts.append(Paragraph(_protocol_title(rec), S["proto"]))
+    parts.append(Paragraph("MEL Indicator: " + code_str, S["code"]))
+    parts.append(Paragraph("Protocol: " + _protocol_title(rec), S["proto"]))
     parts.append(Spacer(1, 3))
 
     # tier + cost + effort line
