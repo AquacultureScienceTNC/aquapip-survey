@@ -18,8 +18,16 @@ WHAT IT DOES
   the results page can float "you already do most of this" protocols up within
   their tier. It NEVER filters — a blank screener leaves order unchanged.
 
-RANKING MODEL (see match())
----------------------------
+RANKING MODEL (see match_row())
+-------------------------------
+With the database's "Monitoring Methods (multi-select)" column (AT), which
+lists the methods each protocol itself carries in these exact screener labels:
+  overlap = |protocol methods & farmer's ticks| / |protocol methods|
+  chip    = the ticked labels found in the protocol's list
+A protocol with an empty list gets no chip and no boost. How the overlap sits
+against farm fit is set by mel_logic.MON_SORT.
+
+LEGACY, for database files without column AT (see match()):
   ag_coverage = |protocol.AG ∩ farmer.AG| / |protocol.AG|   # keyed on the
       protocol's OWN method count, so a protocol the farmer already fully
       performs scores 1.0 and one needing 3 methods they do 1 of scores 0.33.
@@ -32,6 +40,17 @@ RANKING MODEL (see match())
 import re
 import openpyxl
 import streamlit as st
+
+
+def _st_version():
+    try:
+        return tuple(int(x) for x in st.__version__.split(".")[:2])
+    except Exception:
+        return (0, 0)
+
+
+# Streamlit 1.46+ uses width="stretch"; use_container_width is deprecated there.
+_STRETCH = {"width": "stretch"} if _st_version() >= (1, 46) else {"use_container_width": True}
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -146,7 +165,7 @@ def render_screener(mon, key_prefix="mon"):
 
         caret = "\u25be" if is_open else "\u25b8"   # ▾ / ▸
         header = f"{caret}   {c}" + (f"      ·   {n} selected" if n else "")
-        if st.button(header, key=f"{key_prefix}_hdr_{c}", use_container_width=True):
+        if st.button(header, key=f"{key_prefix}_hdr_{c}", **_STRETCH):
             if is_open:
                 open_cats.discard(c)
             else:
@@ -193,11 +212,13 @@ def get_selected():
 # Scoring
 # --------------------------------------------------------------------------- #
 def _kw_hit(text_lower, kw):
-    """Letter-boundary match so 'ph' does not fire inside 'phosphate' or
-    'morphology', and 'tag' does not fire inside 'stage'. Digits/symbols in a
-    keyword (e.g. '12s', 'gf/f', '%n', 'e. coli') are fine."""
-    return re.search(r'(?<![a-z])' + re.escape(kw) + r'(?![a-z])',
-                     text_lower) is not None
+    """Legacy matcher. Left letter-boundary always, so 'ph' does not fire inside
+    'phosphate' or 'morphology'. Short keywords (<= 3 chars, e.g. 'ph', 'doc',
+    'tag') also need a right boundary; longer ones match as prefixes so stems
+    ('epibiot', 'incubat') and plurals ('settlement plate' -> 'plates') hit.
+    Digits/symbols in a keyword (e.g. '12s', 'gf/f', '%n', 'e. coli') are fine."""
+    tail = r'(?![a-z])' if len(kw) <= 3 else ''
+    return re.search(r'(?<![a-z])' + re.escape(kw) + tail, text_lower) is not None
 
 
 def _ag_set(row_ag):
@@ -241,6 +262,23 @@ def match(row_ag, row_ak, selected,
     return score, covered
 
 
+def match_row(row, selected):
+    """Score one protocol row (dict from mel_logic.load_database).
+
+    Uses the row's exact method list (column AT) when the database has it;
+    otherwise falls back to the legacy AG + keyword match(). Returns
+    (score 0..1, covered_labels); covered_labels feeds the chip."""
+    if not selected:
+        return 0.0, []
+    if row.get("mm_present"):
+        methods = set(row.get("monitoring_methods") or [])
+        if not methods:
+            return 0.0, []
+        covered = [s["sub"] for s in selected if s["sub"] in methods]
+        return len(covered) / len(methods), covered
+    return match(row.get("method_category"), row.get("method_summary"), selected)
+
+
 # =========================================================================== #
 # INTEGRATION  (all three edits are already applied in the app.py you were given)
 # =========================================================================== #
@@ -258,8 +296,7 @@ def match(row_ag, row_ak, selected,
 #
 # 2. RANKING BOOST — in render_results(), build a scorer and pass it in:
 #        sel = sub.get("mon_sel", [])
-#        mon_scorer = (lambda row: monitoring.match(
-#            row["method_category"], row["method_summary"], sel)) if sel else None
+#        mon_scorer = (lambda row: monitoring.match_row(row, sel)) if sel else None
 #        matches = ml.match_protocols(rows, sub["codes"], sub["profile"],
 #                                     farmer_aqua=sub["aqua_type"],
 #                                     mon_scorer=mon_scorer)

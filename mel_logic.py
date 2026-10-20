@@ -46,6 +46,14 @@ import openpyxl
 
 DATA_SHEET_CANDIDATES = ["in"]          # preferred data sheet name(s)
 VOCAB_SHEET = "Vocabularies"
+MM_HEADER = "Monitoring Methods (multi-select)"   # AT: exact Monitoring_Approaches labels
+
+# Within-tier position of the "already monitoring" overlap relative to farm fit.
+#   "band"      : all / part / none of the protocol's methods first, then farm fit,
+#                 then the exact overlap share (default)
+#   "exact"     : exact overlap share first, then farm fit
+#   "fit_first" : farm fit first; overlap only breaks fit ties
+MON_SORT = "band"
 
 # Tier -> label + colour (your palette from the Usability Tier System).
 TIER_META = OrderedDict([
@@ -351,6 +359,11 @@ def load_database(path):
             c = headers_norm.get(_norm(header))
         return data_ws.cell(row=r, column=c).value if c else None
 
+    # Row-level "Monitoring Methods" column (exact screener labels). When the
+    # column exists, the screener chip and ranking use it; older files without
+    # it fall back to the legacy AG + keyword matcher in monitoring.py.
+    mm_present = MM_HEADER in headers or _norm(MM_HEADER) in headers_norm
+
     rows = []
     for r in range(2, data_ws.max_row + 1):
         title = cell(r, "Title")
@@ -412,6 +425,9 @@ def load_database(path):
             "url_template": _s(cell(r, "Protocol Template URL")),        # AM
             "url_datasheet": _s(cell(r, "Data Sheet URL")),             # AN
             "url_workbook": _s(cell(r, "Stats Workbook URL")),          # AO
+            # methods the protocol itself carries, as exact screener labels (AT)
+            "monitoring_methods": split_multi(cell(r, MM_HEADER)) if mm_present else [],
+            "mm_present": mm_present,
         })
 
     return rows, load_vocab(wb), headers
@@ -592,6 +608,21 @@ def _aqua_match(farmer_aqua, row_aqua_list):
     return fa in rows or any("multi-trophic" in r for r in rows)
 
 
+def _mon_band(mon):
+    """0 = none of the protocol's methods, 1 = some of them, 2 = all of them."""
+    return 0 if mon <= 0 else (2 if mon >= 0.999 else 1)
+
+
+def _mon_fit_keys(mon, pscore):
+    """Sort keys for the monitoring overlap and farm fit, per MON_SORT."""
+    m = round(mon, 4)
+    if MON_SORT == "fit_first":
+        return (-pscore, -m)
+    if MON_SORT == "exact":
+        return (-m, -pscore)
+    return (-_mon_band(mon), -pscore, -m)            # "band" (default)
+
+
 def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=None):
     """For each selected indicator code, return ranked candidate protocols.
 
@@ -602,10 +633,12 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=
     profile fields.
 
     mon_scorer (optional): callable row -> (score 0..1, covered_labels list),
-    the "what are you already monitoring?" boost. When given, it becomes a
+    the "what are you already monitoring?" boost (share of the protocol's own
+    methods the farmer already does). When given, it becomes a
     WITHIN-TIER preference — applied after the protocol-before-reference rule
-    and before the soft farm-fit score, so a protocol the farmer already
-    largely runs floats up within its tier. It never changes the tier itself
+    and combined with the soft farm-fit score as MON_SORT sets (default "band":
+    protocols the farmer fully runs, then partly runs, then the rest, with farm
+    fit ordering each group). It never changes the tier itself
     and never filters. When None, ranking is identical to before."""
     result = OrderedDict()
     for code in selected_codes:
@@ -622,8 +655,7 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=
         cands.sort(key=lambda d: (
             -d["row"]["tier"],                              # higher tier first
             0 if d["row"]["is_protocol"] else 1,            # protocol before reference
-            -round(d["mon"], 4),                            # already-monitoring boost (within tier)
-            -d["pscore"],                                   # better farm fit first
+            ) + _mon_fit_keys(d["mon"], d["pscore"]) + (    # monitoring overlap vs farm fit (MON_SORT)
             d["row"]["cost_ord"] if d["row"]["cost_ord"] > 0 else 99,   # cheaper first
             d["row"]["effort_ord"] if d["row"]["effort_ord"] > 0 else 99,  # less effort first
             d["row"]["row"],                                # stable
