@@ -31,7 +31,11 @@ st.set_page_config(page_title="TNC Filtration Service Estimator", page_icon="�
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WB_PATH = os.path.join(HERE, "data", fl.DEFAULT_WORKBOOK)
-PROTOCOL_DIR = os.path.join(HERE, "data", "protocols")
+# Protocol PDFs belong in data/protocols/. Uploading a folder through GitHub's
+# web page can nest it one level deeper (data/data/protocols/), so look there too.
+PROTOCOL_DIRS = [os.path.join(HERE, "data", "protocols"),
+                 os.path.join(HERE, "data", "data", "protocols")]
+PROTOCOL_DIR = PROTOCOL_DIRS[0]
 
 # Set this to your deployed AquaPIP URL to show a cross-link button (leave blank
 # to hide it). e.g. "https://aquapip.streamlit.app"
@@ -149,9 +153,20 @@ def step(txt, off=False):
     st.markdown(f"<div class='{cls}'>{txt}</div>", unsafe_allow_html=True)
 
 
-def other_tool_card(t):
+def _flip(key):
+    """Button callback: toggle a True/False setting kept between reruns."""
+    st.session_state[key] = not st.session_state.get(key, False)
+
+
+def _continue_here(name):
+    """Button callback: the farmer chose to carry on in this estimator."""
+    st.session_state["continue_for"] = name
+
+
+def other_tool_card(t, species=None, continued=False):
     """'Are you measuring filtration rates in X?' card + a link to the other tool
-    (see OTHER_TOOLS near the top)."""
+    (see OTHER_TOOLS near the top). Compare cards also get a 'Continue here'
+    button; the steps below stay greyed out until it is clicked."""
     redirect = t["mode"] == "redirect"
     body = ((t.get("note", "") + " ") if redirect else "") + \
         f"The {t['tool']} may give a more site-specific estimate. {t['why']}"
@@ -162,14 +177,24 @@ def other_tool_card(t):
         unsafe_allow_html=True)
     if redirect:
         st.link_button(f"Go to the {t['tool']} ↗", t["url"], type="primary")
-    else:
-        st.link_button(f"Compare with the {t['tool']} ↗", t["url"])
+        return
+    b1, b2, _ = st.columns([1.5, 1, 1.5])
+    with b1:
+        st.link_button(f"Compare with the {t['tool']} ↗", t["url"],
+                       use_container_width=True)
+    with b2:
+        if continued:
+            st.button("✓ Continuing here", disabled=True, key="cont_done",
+                      use_container_width=True)
+        else:
+            st.button("Continue here", key="cont_btn", on_click=_continue_here,
+                      args=(species or t["name"],), use_container_width=True)
 
 
-def greyed_next_steps():
+def greyed_next_steps(note="The steps below are greyed out for this species."):
     """Steps 2-4, shown disabled: the farmer sees what this estimator asks for,
     but is pointed to the other tool linked above."""
-    st.caption("The steps below are greyed out for this species.")
+    st.caption(note)
     step("2 · Shell height & how many", off=True)
     st.radio("Size entry", ["One shell height", "Several size classes"],
              horizontal=True, label_visibility="collapsed", disabled=True,
@@ -231,37 +256,34 @@ def conversions_for(species_name):
 
 
 def protocol_files():
-    """Any real files dropped into data/protocols/ (ignore placeholders)."""
-    if not os.path.isdir(PROTOCOL_DIR):
-        return []
-    out = []
-    for p in sorted(glob.glob(os.path.join(PROTOCOL_DIR, "*"))):
-        base = os.path.basename(p)
-        if base.lower() in ("readme.md", ".gitkeep", "readme.txt"):
+    """Real files in the protocol folders (placeholders ignored). Checks every
+    folder in PROTOCOL_DIRS; if a file name appears twice, the first copy wins."""
+    out, seen = [], set()
+    for d in PROTOCOL_DIRS:
+        if not os.path.isdir(d):
             continue
-        if os.path.isfile(p):
-            out.append(p)
+        for p in sorted(glob.glob(os.path.join(d, "*"))):
+            base = os.path.basename(p)
+            if base.lower() in ("readme.md", ".gitkeep", "readme.txt") or base in seen:
+                continue
+            if os.path.isfile(p):
+                seen.add(base)
+                out.append(p)
     return out
-# ============================================================================
-# Dry-weight protocol + data sheet download — drop-in for filtration_app.py
-#
-# 1. Put both PDFs in the repo at data/protocols/ :
-#       Bivalve_dry_weight_protocol.pdf
-#       Bivalve_dry_weight_data_sheet.pdf
-#    and remove any older dry-weight protocol file from that folder.
-# 2. In filtration_app.py, delete the existing functions
-#       dry_weight_protocol()   and   dry_weight_protocol_button(key)
-#    and paste everything below in their place (just under protocol_files()).
-#
-# Nothing else changes: the two existing calls,
-#    dry_weight_protocol_button("proto_one") and
-#    dry_weight_protocol_button("proto_meas"),
-# now download both PDFs with one click.
-# ============================================================================
 
+
+# --------------------------------------------------------------------------- #
+# Dry-weight protocol + data sheet: one click downloads both (as one zip)
+# --------------------------------------------------------------------------- #
 DRY_WEIGHT_PROTOCOL_PDF = "Bivalve_dry_weight_protocol.pdf"
 DRY_WEIGHT_DATASHEET_PDF = "Bivalve_dry_weight_data_sheet.pdf"
 DRY_WEIGHT_ZIP_NAME = "Bivalve_dry_weight_protocol_and_data_sheet.zip"
+
+
+def _find_in_data(name):
+    """Last resort: an exact file name anywhere under data/."""
+    hits = sorted(glob.glob(os.path.join(HERE, "data", "**", name), recursive=True))
+    return hits[0] if hits else None
 
 
 def dry_weight_files():
@@ -270,8 +292,8 @@ def dry_weight_files():
     is the data sheet, and one mentioning protocol/dry/weight/dtw is the protocol."""
     files = protocol_files()
     by_name = {os.path.basename(p): p for p in files}
-    proto = by_name.get(DRY_WEIGHT_PROTOCOL_PDF)
-    sheet = by_name.get(DRY_WEIGHT_DATASHEET_PDF)
+    proto = by_name.get(DRY_WEIGHT_PROTOCOL_PDF) or _find_in_data(DRY_WEIGHT_PROTOCOL_PDF)
+    sheet = by_name.get(DRY_WEIGHT_DATASHEET_PDF) or _find_in_data(DRY_WEIGHT_DATASHEET_PDF)
     for p in files:
         b = os.path.basename(p).lower()
         if "sheet" in b:
@@ -420,7 +442,12 @@ if not sp.calculable:
 fcol1, fcol2 = st.columns([3, 1])
 with fcol1:
     if sp.in_full:
-        st.markdown(f"<div class='formula'>{sp.in_full}</div>", unsafe_allow_html=True)
+        _eq_on = st.session_state.get("show_eq", False)
+        st.button("Hide equation" if _eq_on else "Show equation", key="eq_btn",
+                  on_click=_flip, args=("show_eq",))
+        if _eq_on:
+            st.markdown(f"<div class='formula'>{sp.in_full}</div>",
+                        unsafe_allow_html=True)
 with fcol2:
     with st.popover("📄 Reference & notes", use_container_width=True):
         st.markdown(f"**{sp.name}**")
@@ -438,9 +465,15 @@ with fcol2:
         if not matched and not sp.reference and not sp.notes:
             st.caption("No reference or notes recorded for this species yet.")
 
-# Another tool covers this species too: offer it as a comparison.
+# Another tool covers this species too: offer it, and keep the estimate below
+# greyed out until the farmer chooses "Continue here".
 if other and other["mode"] == "compare":
-    other_tool_card(other)
+    _here = st.session_state.get("continue_for") == sp.name
+    other_tool_card(other, species=sp.name, continued=_here)
+    if not _here:
+        greyed_next_steps("The steps below are greyed out until you choose "
+                          "Continue here.")
+        st.stop()
 
 
 # Dry-weight source options — defined here so Step 2 can react to the choice the
