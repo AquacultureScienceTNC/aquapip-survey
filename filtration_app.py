@@ -113,10 +113,8 @@ st.markdown(f"""
              border-radius:0 10px 10px 0; padding:.75rem 1rem; margin:.6rem 0; }}
   .caveat .hd {{ color:#8A5A00; font-weight:700; font-family:Georgia,serif; margin-bottom:.25rem; }}
   .caveat p {{ color:#5B4a1f; font-size:.9rem; margin:.15rem 0; }}
-  .restore {{ background:#EAF1F4; border:1px solid #C4D6DE; border-left:5px solid {TEAL};
-              border-radius:0 10px 10px 0; padding:.75rem 1rem; margin:.6rem 0; }}
-  .restore .hd {{ color:{TEAL}; font-weight:700; font-family:Georgia,serif; margin-bottom:.25rem; }}
-  .restore p {{ color:#274B54; font-size:.9rem; margin:.15rem 0; }}
+  .caveat .sub {{ color:#8A5A00; font-weight:700; font-family:Georgia,serif;
+                 margin:.6rem 0 .2rem; padding-top:.55rem; border-top:1px solid #F2D591; }}
   .metricbig {{ background:#EAF3F1; border:1px solid #CFE4DE; border-radius:12px;
                 padding:1rem 1.15rem; text-align:center; }}
   .metricbig .num {{ font-family:Georgia,serif; color:{TEAL}; font-size:2.0rem; font-weight:700; line-height:1.1; }}
@@ -734,8 +732,8 @@ for n in notes:
 
 
 # --------------------------------------------------------------------------- #
-# Caveats + farm-vs-restoration note — shown here, after the person has entered
-# their data and seen the estimate.
+# Caveats — one card: the general caveats, then the farm-vs-wild caveat under a
+# divider. Shown here, after the person has entered their data and seen the estimate.
 # --------------------------------------------------------------------------- #
 st.markdown(
     "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>"
@@ -752,12 +750,8 @@ st.markdown(
     "but also represents a valuable area for species-specific and farm-based "
     "research. If you have data that may inform this tool, please reach out to us "
     "using the contact form at the bottom of the page.</p>"
-    "</div>",
-    unsafe_allow_html=True)
-
-st.markdown(
-    "<div class='restore'><div class='hd'>Farm filtration is not equivalent to "
-    "wild and restored bivalves</div>"
+    "<div class='sub'>Farm filtration is not equivalent to wild and restored "
+    "bivalves</div>"
     "<p>It is important to recognise that ecosystem services supported by an "
     "aquaculture farm are not directly equivalent to those provided by wild and "
     "restored bivalve communities (Munroe et al. 2026, Lefcheck et al. 2021, "
