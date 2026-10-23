@@ -43,7 +43,7 @@ AQUAPIP_URL = ""
 
 # Set this to a contact / data-sharing form URL (e.g. the same Microsoft Form you
 # use for AquaPIP) to show a "Get in touch" button at the bottom. Blank = hidden.
-CONTACT_URL = ""
+CONTACT_URL = "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=wW2-eY7Xu0uyK9mUwKQXp6WdY3q1w15BvDRlgn30McZURVlVWEtVV1I3MlZZRUoxQlFRVDZUTzBBTS4u"
 
 # --------------------------------------------------------------------------- #
 # Other filtration tools, linked by species  (edit here)
@@ -366,6 +366,9 @@ hcols = st.columns([3, 1])
 with hcols[1]:
     if AQUAPIP_URL:
         st.link_button("↩ Back to AquaPIP", AQUAPIP_URL, use_container_width=True)
+    if CONTACT_URL:
+        st.link_button("💬 Questions or feedback?", CONTACT_URL,
+                       use_container_width=True)
 st.divider()
 
 # Welcome / what this tool is (fixed framing — not workbook-driven, so it stays
