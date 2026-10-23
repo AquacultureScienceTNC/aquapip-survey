@@ -41,6 +41,49 @@ AQUAPIP_URL = ""
 # use for AquaPIP) to show a "Get in touch" button at the bottom. Blank = hidden.
 CONTACT_URL = ""
 
+# --------------------------------------------------------------------------- #
+# Other filtration tools, linked by species  (edit here)
+#   "redirect": this estimator doesn't calculate the species. Steps 2-4 are shown
+#               greyed out and the farmer is pointed to the other tool. A redirect
+#               species that isn't in the workbook is added to the species list.
+#               (Redirect wins even if the workbook later gains an equation for the
+#               species: switch it to "compare" if you want the estimate to run.)
+#   "compare":  the estimate runs as normal, with a link to compare.
+# Keys are scientific names in lower case; they are matched against the workbook.
+# --------------------------------------------------------------------------- #
+FARM_URL = "http://www.farmscale.org/"
+FARM_WHY = ("It models your farm using water data from your site, such as "
+            "chlorophyll.")
+OTHER_TOOLS = {
+    "crassostrea virginica": {
+        "name": "Crassostrea virginica", "common": "eastern oyster",
+        "mode": "redirect", "tool": "Rutgers Oyster Eco-Serve Calculator",
+        "url": "https://itsappserver.sebs.rutgers.edu/Oysterecoservecalc/",
+        "note": "This estimator doesn't calculate eastern oyster.",
+        "why": ("It is built from feeding measurements taken on working oyster "
+                "farms, and covers farms from Massachusetts to Virginia."),
+    },
+    "mytilus galloprovincialis": {
+        "name": "Mytilus galloprovincialis", "common": "Mediterranean mussel",
+        "mode": "redirect", "tool": "FARM model", "url": FARM_URL,
+        "note": ("This estimator doesn't have a filtration equation for "
+                 "Mediterranean mussel yet."),
+        "why": FARM_WHY,
+    },
+    "crassostrea gigas": {
+        "name": "Crassostrea gigas", "common": "Pacific oyster",
+        "mode": "compare", "tool": "FARM model", "url": FARM_URL, "why": FARM_WHY,
+    },
+    "mytilus edulis": {
+        "name": "Mytilus edulis", "common": "blue mussel",
+        "mode": "compare", "tool": "FARM model", "url": FARM_URL, "why": FARM_WHY,
+    },
+    "ruditapes philippinarum": {
+        "name": "Ruditapes philippinarum", "common": "Manila clam",
+        "mode": "compare", "tool": "FARM model", "url": FARM_URL, "why": FARM_WHY,
+    },
+}
+
 TEAL = "#0B4F5C"
 
 # Same visual language as AquaPIP (app.py), plus a caveat card + metric styles.
@@ -52,6 +95,7 @@ st.markdown(f"""
   .hero h1 {{ margin-bottom:.1rem; font-size:1.85rem; }}
   .hero p  {{ color:#5B6B70; margin-top:0; font-size:.95rem; }}
   .step {{ font-family:Georgia,serif; color:{TEAL}; font-weight:700; font-size:1.12rem; margin:1.2rem 0 .2rem; }}
+  .step.off {{ color:#AEB9BD; }}
   .card {{ background:#fff; border:1px solid #E1E7E9; border-left:5px solid {TEAL};
            border-radius:0 10px 10px 0; padding:.8rem 1rem; margin:.5rem 0; }}
   .k {{ font-size:.66rem; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:#5B6B70; margin-top:.45rem; }}
@@ -100,8 +144,51 @@ REFS = bundle["references"]
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
-def step(txt):
-    st.markdown(f"<div class='step'>{txt}</div>", unsafe_allow_html=True)
+def step(txt, off=False):
+    cls = "step off" if off else "step"
+    st.markdown(f"<div class='{cls}'>{txt}</div>", unsafe_allow_html=True)
+
+
+def other_tool_card(t):
+    """'Are you measuring filtration rates in X?' card + a link to the other tool
+    (see OTHER_TOOLS near the top)."""
+    redirect = t["mode"] == "redirect"
+    body = ((t.get("note", "") + " ") if redirect else "") + \
+        f"The {t['tool']} may give a more site-specific estimate. {t['why']}"
+    st.markdown(
+        "<div class='card'>"
+        f"<b style='color:{TEAL}'>Are you measuring filtration rates in "
+        f"{t['common']}?</b><br><span class='v'>{body}</span></div>",
+        unsafe_allow_html=True)
+    if redirect:
+        st.link_button(f"Go to the {t['tool']} ↗", t["url"], type="primary")
+    else:
+        st.link_button(f"Compare with the {t['tool']} ↗", t["url"])
+
+
+def greyed_next_steps():
+    """Steps 2-4, shown disabled: the farmer sees what this estimator asks for,
+    but is pointed to the other tool linked above."""
+    st.caption("The steps below are greyed out for this species.")
+    step("2 · Shell height & how many", off=True)
+    st.radio("Size entry", ["One shell height", "Several size classes"],
+             horizontal=True, label_visibility="collapsed", disabled=True,
+             key="off_size")
+    g1, g2 = st.columns(2)
+    with g1:
+        st.number_input("Mean shell height (mm)", value=50.0, disabled=True,
+                        key="off_shell")
+    with g2:
+        st.number_input("Number of bivalves", value=1000, disabled=True,
+                        key="off_count")
+    step("3 · Dry weight", off=True)
+    st.radio("Dry-weight source", ["Use average dry weight",
+                                   "Use dry weight by size class",
+                                   "Estimate dry weight from my shell height"],
+             label_visibility="collapsed", disabled=True, key="off_dw")
+    step("4 · Water temperature", off=True)
+    st.number_input("Water temperature (°C)", value=18.0, disabled=True,
+                    key="off_temp")
 
 
 def sig(x, n=3):
@@ -296,11 +383,25 @@ with st.expander("How to use this tool"):
 # --------------------------------------------------------------------------- #
 step("1 · Choose your species")
 sp_names = [s.name for s in SPECIES]
+# Redirect-only species (e.g. eastern oyster) join the list next to their genus.
+_known = {fl.norm_species(n).lower() for n in sp_names}
+for _key, _t in OTHER_TOOLS.items():
+    if _t["mode"] == "redirect" and _key not in _known:
+        _genus = _t["name"].split()[0].lower() + " "
+        _same = [i for i, n in enumerate(sp_names) if n.lower().startswith(_genus)]
+        sp_names.insert(_same[-1] + 1 if _same else len(sp_names), _t["name"])
 sel_name = st.selectbox("Species", sp_names, index=None,
                         placeholder="Select the bivalve you farm...",
                         label_visibility="collapsed")
 if not sel_name:
     st.info("Pick your species to start the estimate.")
+    st.stop()
+
+# Species handled by another tool: point there and grey out the next steps.
+other = OTHER_TOOLS.get(fl.norm_species(sel_name).lower())
+if other and other["mode"] == "redirect":
+    other_tool_card(other)
+    greyed_next_steps()
     st.stop()
 
 sp = next(s for s in SPECIES if s.name == sel_name)
@@ -336,6 +437,10 @@ with fcol2:
             st.caption(sp.notes)
         if not matched and not sp.reference and not sp.notes:
             st.caption("No reference or notes recorded for this species yet.")
+
+# Another tool covers this species too: offer it as a comparison.
+if other and other["mode"] == "compare":
+    other_tool_card(other)
 
 
 # Dry-weight source options — defined here so Step 2 can react to the choice the
