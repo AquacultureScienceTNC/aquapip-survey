@@ -155,35 +155,92 @@ def protocol_files():
         if os.path.isfile(p):
             out.append(p)
     return out
+# ============================================================================
+# Dry-weight protocol + data sheet download — drop-in for filtration_app.py
+#
+# 1. Put both PDFs in the repo at data/protocols/ :
+#       Bivalve_dry_weight_protocol.pdf
+#       Bivalve_dry_weight_data_sheet.pdf
+#    and remove any older dry-weight protocol file from that folder.
+# 2. In filtration_app.py, delete the existing functions
+#       dry_weight_protocol()   and   dry_weight_protocol_button(key)
+#    and paste everything below in their place (just under protocol_files()).
+#
+# Nothing else changes: the two existing calls,
+#    dry_weight_protocol_button("proto_one") and
+#    dry_weight_protocol_button("proto_meas"),
+# now download both PDFs with one click.
+# ============================================================================
+
+DRY_WEIGHT_PROTOCOL_PDF = "Bivalve_dry_weight_protocol.pdf"
+DRY_WEIGHT_DATASHEET_PDF = "Bivalve_dry_weight_data_sheet.pdf"
+DRY_WEIGHT_ZIP_NAME = "Bivalve_dry_weight_protocol_and_data_sheet.zip"
+
+
+def dry_weight_files():
+    """(protocol_path, datasheet_path) from data/protocols/; either may be None.
+    The exact file names above win. Otherwise a file whose name mentions 'sheet'
+    is the data sheet, and one mentioning protocol/dry/weight/dtw is the protocol."""
+    files = protocol_files()
+    by_name = {os.path.basename(p): p for p in files}
+    proto = by_name.get(DRY_WEIGHT_PROTOCOL_PDF)
+    sheet = by_name.get(DRY_WEIGHT_DATASHEET_PDF)
+    for p in files:
+        b = os.path.basename(p).lower()
+        if "sheet" in b:
+            sheet = sheet or p
+        elif any(k in b for k in ("protocol", "dry", "weight", "dtw")):
+            proto = proto or p
+    return proto, sheet
 
 
 def dry_weight_protocol():
-    """The dry-tissue-weight protocol file, if one has been added. Prefers a file
-    whose name mentions 'dry'/'weight'; otherwise the first protocol file."""
-    files = protocol_files()
-    if not files:
-        return None
-    for p in files:
-        b = os.path.basename(p).lower()
-        if "dry" in b or "weight" in b or "dtw" in b:
-            return p
-    return files[0]
+    """Kept for backwards compatibility: the protocol file path, or None."""
+    return dry_weight_files()[0]
 
 
+@st.cache_data(show_spinner=False)
+def _zip_files(paths, mtimes):
+    """One in-memory zip holding the given files. `mtimes` is in the signature
+    only so the cached zip refreshes when a PDF in the repo is replaced."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in paths:
+            z.write(p, arcname=os.path.basename(p))
+    return buf.getvalue()
+  
 def dry_weight_protocol_button(key):
-    """Render the dry-weight protocol download — a working button if the file is
-    present, otherwise a greyed-out 'coming soon' button. `key` keeps Streamlit
-    widgets unique across the places this is shown."""
-    p = dry_weight_protocol()
-    if p:
-        with open(p, "rb") as fh:
-            st.download_button(f"📄 Download dry-weight protocol ({os.path.basename(p)})",
-                               data=fh.read(), file_name=os.path.basename(p),
-                               key=key)
-    else:
+    """One click downloads the protocol AND its data sheet. Streamlit sends one
+    file per click, so both PDFs travel together in a single zip. If only one
+    of the two files is present it downloads on its own; if neither is, a
+    greyed-out 'coming soon' button shows. `key` keeps the widget unique across
+    the places this is shown."""
+    proto, sheet = dry_weight_files()
+    files = [p for p in (proto, sheet) if p]
+    if not files:
         st.button("📄 Dry-weight protocol (coming soon)", disabled=True, key=key,
                   help="Not yet available — drop the protocol PDF into "
                        "data/protocols/ in the repo and it will activate here.")
+        return
+    if len(files) == 1:
+        p = files[0]
+        label = ("📄 Download dry-weight protocol" if p == proto
+                 else "📄 Download dry-weight data sheet")
+        with open(p, "rb") as fh:
+            st.download_button(label, data=fh.read(),
+                               file_name=os.path.basename(p),
+                               mime="application/pdf", key=key)
+        return
+    data = _zip_files(tuple(files), tuple(os.path.getmtime(p) for p in files))
+    st.download_button("📄 Download dry-weight protocol + data sheet", data=data,
+                       file_name=DRY_WEIGHT_ZIP_NAME, mime="application/zip",
+                       key=key,
+                       help="Two PDFs in one download: the step-by-step protocol "
+                            "and a printable data sheet (one sheet per size class).")
+
+
 
 
 # --------------------------------------------------------------------------- #
