@@ -56,13 +56,27 @@ MM_HEADER = "Monitoring Methods (multi-select)"   # AT: exact Monitoring_Approac
 MON_SORT = "band"
 
 # Tier -> label + colour (your palette from the Usability Tier System).
+# Scale (database v93+): 1 = easiest. T1 Practitioner -> T3 Researcher are shown;
+# T4 Reference rows stay in the database but are never shown in the tool.
 TIER_META = OrderedDict([
-    (4, {"label": "Practitioner", "color": "#92D050", "skill": "Basic"}),
-    (3, {"label": "Partnership",  "color": "#C5E0B4", "skill": "Intermediate"}),
-    (2, {"label": "Researcher",   "color": "#FFD966", "skill": "Advanced"}),
-    (1, {"label": "Reference",    "color": "#F08080", "skill": "Reference"}),
+    (1, {"label": "Practitioner", "color": "#92D050", "skill": "Basic"}),
+    (2, {"label": "Partnership",  "color": "#C5E0B4", "skill": "Intermediate"}),
+    (3, {"label": "Researcher",   "color": "#FFD966", "skill": "Advanced"}),
+    (4, {"label": "Reference",    "color": "#F08080", "skill": "Reference"}),
 ])
 UNRATED = {"label": "Unrated", "color": "#CCCCCC", "skill": "—"}
+HIDDEN_TIERS = {4}                     # kept in the database, never shown in the tool
+VISIBLE_TIER_META = OrderedDict((n, m) for n, m in TIER_META.items() if n not in HIDDEN_TIERS)
+
+
+def tier_rank(n):
+    """Sort key: T1 first, then T2, T3; unrated (0) last."""
+    return n if n else 99
+
+
+def visible_rows(rows):
+    """Drop hidden-tier rows (T4 Reference) so nothing downstream can show them."""
+    return [r for r in rows if r["tier"] not in HIDDEN_TIERS]
 
 # Indicator code pattern, e.g. "H&B 1.1.1", "WQ 1.1.1", "CC 3.1.1".
 CODE_RE = re.compile(r'(H&B|WQ|CC)\s+\d+\.\d+\.\d+')
@@ -220,17 +234,21 @@ def _code_sort_key(code):
 
 
 def parse_tier(value):
-    """Return (n, label, color, skill)."""
+    """Return (n, label, color, skill).
+
+    The tier NAME decides first ('Practitioner' is always T1, 'Reference' always
+    T4), so a cell written on the pre-v93 scale ('4 — Practitioner') still reads
+    correctly. A bare number falls back to the current 1-4 scale."""
     s = _s(value)
+    low = s.lower()
+    for n, meta in TIER_META.items():
+        if meta["label"].lower() in low:
+            return n, meta["label"], meta["color"], meta["skill"]
     m = re.match(r"\s*([1-4])", s)
     if m:
         n = int(m.group(1))
         meta = TIER_META[n]
         return n, meta["label"], meta["color"], meta["skill"]
-    low = s.lower()
-    for n, meta in TIER_META.items():
-        if meta["label"].lower() in low:
-            return n, meta["label"], meta["color"], meta["skill"]
     return 0, UNRATED["label"], UNRATED["color"], UNRATED["skill"]
 
 
@@ -629,8 +647,9 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=
     Returns OrderedDict: code -> [ {row, pscore, pmatched, badge, mon,
     mon_covered}, ... ] ranked best-first. If farmer_aqua is given, only
     protocols applicable to that sector are returned (resolves the CC
-    sector-collision). 'badge' is True when the farm is a clear fit on the soft
-    profile fields.
+    sector-collision). Hidden-tier rows (T4 Reference) are never returned.
+    Candidates rank T1 Practitioner first. 'badge' is True when the farm is a
+    clear fit on the soft profile fields.
 
     mon_scorer (optional): callable row -> (score 0..1, covered_labels list),
     the "what are you already monitoring?" boost (share of the protocol's own
@@ -644,6 +663,8 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=
     for code in selected_codes:
         cands = []
         for row in rows:
+            if row["tier"] in HIDDEN_TIERS:                 # T4 Reference: never shown
+                continue
             if code in row["indicator_codes"] and (
                     farmer_aqua is None or _aqua_match(farmer_aqua, row["aqua_type"])):
                 pscore, pmatched = profile_score(row, profile)
@@ -653,7 +674,7 @@ def match_protocols(rows, selected_codes, profile, farmer_aqua=None, mon_scorer=
                               "pmatched": pmatched, "badge": badge,
                               "mon": mscore, "mon_covered": mcov})
         cands.sort(key=lambda d: (
-            -d["row"]["tier"],                              # higher tier first
+            tier_rank(d["row"]["tier"]),                    # T1 first, then T2, T3; unrated last
             0 if d["row"]["is_protocol"] else 1,            # protocol before reference
             ) + _mon_fit_keys(d["mon"], d["pscore"]) + (    # monitoring overlap vs farm fit (MON_SORT)
             d["row"]["cost_ord"] if d["row"]["cost_ord"] > 0 else 99,   # cheaper first

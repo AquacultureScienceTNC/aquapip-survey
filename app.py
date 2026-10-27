@@ -101,6 +101,7 @@ st.markdown(f"""
 @st.cache_data(show_spinner=False)
 def get_data(_m_db, _m_ref):
     rows, vocab, headers = ml.load_database(DB_PATH)
+    rows = ml.visible_rows(rows)      # T4 Reference rows stay in the database, never shown here
     ref = ml.load_reference(REF_PATH)
     prof_opts = ml.profile_options(vocab, rows)
     mon = monitoring.load(REF_PATH)   # "what are you already monitoring?" screener
@@ -578,27 +579,25 @@ def render_learn_classes():
         "guides, and technical reports. We've read each source and sorted them so the most "
         "farmer-friendly options rise to the top. Here's what the labels mean.")
 
-    st.markdown("##### Who can run it - the tier (T4-T1)")
-    for n, meta in ml.TIER_META.items():
+    st.markdown("##### Who can run it - the tier (T1-T3)")
+    for n, meta in ml.VISIBLE_TIER_META.items():
         st.markdown(f"<span class='sq' style='background:{meta['color']}'></span>"
                     f"<b>T{n} - {meta['label']}</b>", unsafe_allow_html=True)
     st.markdown(
-        "- **T4 - Practitioner** (green): you can run it essentially on your own, with gear and skills "
+        "- **T1 - Practitioner** (green): you can run it essentially on your own, with gear and skills "
         "common on a working farm - visual transects, baited camera drops, basket traps.\n"
-        "- **T3 - Partnership** (pale green): you do the fieldwork, but one step - usually the lab "
+        "- **T2 - Partnership** (pale green): you do the fieldwork, but one step - usually the lab "
         "analysis - is best handed to a partner such as a local university or a commercial lab.\n"
-        "- **T2 - Researcher** (amber): assumes a specialist team throughout, or specialized "
+        "- **T3 - Researcher** (amber): assumes a specialist team throughout, or specialized "
         "equipment and analysis (satellite mapping, eDNA, carbonate chemistry). It's here so you can "
-        "see what's possible and know who to call.\n"
-        "- **T1 - Reference** (coral): not a step-by-step method, but useful background - a review or "
-        "synthesis to help you understand the topic.")
-    st.caption("A higher tier isn't \u201cbetter\u201d - it just takes more specialized hands. Many farms "
-               "start with T4 and T3 methods and bring in partners over time.")
+        "see what's possible and know who to call.")
+    st.caption("A higher tier isn't \u201cworse\u201d - it just takes more specialized hands. Many farms "
+               "start with T1 and T2 methods and bring in partners over time.")
 
     st.markdown("##### Skill")
     st.markdown("Beside the tier you'll see **Basic, Intermediate, or Advanced** - the plain-language "
                 "read of the tier (how much specialized training the method assumes). Basic tracks with "
-                "T4, Intermediate with T3, Advanced with T2. If you're already comfortable with a "
+                "T1, Intermediate with T2, Advanced with T3. If you're already comfortable with a "
                 "technique, trust that experience; the skill level is a guide, not a gate.")
 
     st.markdown("##### Cost")
@@ -642,13 +641,13 @@ def render_learn_classes():
 # VIEW 4 - RESULTS
 # --------------------------------------------------------------------------- #
 def _tier_legend():
-    with st.popover("What do T4-T1 mean?"):
-        for n, meta in ml.TIER_META.items():
+    with st.popover("What do T1-T3 mean?"):
+        for n, meta in ml.VISIBLE_TIER_META.items():
             st.markdown(f"<span class='sq' style='background:{meta['color']}'></span>"
                         f"<b>T{n} - {meta['label']}</b> \u00b7 {meta['skill']}",
                         unsafe_allow_html=True)
-        st.caption("T4 you can run yourself \u00b7 T3 fieldwork by you + a lab step by a partner \u00b7 "
-                   "T2 specialist team throughout \u00b7 T1 background reference (not run).")
+        st.caption("T1 you can run yourself \u00b7 T2 fieldwork by you + a lab step by a partner \u00b7 "
+                   "T3 specialist team throughout.")
 
 
 def _cse_legend():
@@ -658,7 +657,7 @@ def _cse_legend():
                     "\u25cf\u25cf\u25cf over \\$10K (2026 US prices).")
         st.markdown("**Effort** \u25cf\u25cb\u25cb -> \u25cf\u25cf\u25cf - your field time; low = a day, "
                     "high = year-round / continuous.")
-        st.markdown("**Skill** - Basic (T4) \u00b7 Intermediate (T3) \u00b7 Advanced (T2): how much "
+        st.markdown("**Skill** - Basic (T1) \u00b7 Intermediate (T2) \u00b7 Advanced (T3): how much "
                     "specialized training the method assumes.")
         st.markdown("**\u2605 fits your farm** - the method matches the farm details you gave.")
 
@@ -692,9 +691,10 @@ def _render_finalized(sub, matches, code2label):
         r = item[1]["row"]
         cost = r["cost_ord"] if r["cost_ord"] > 0 else 99
         eff = r["effort_ord"] if r["effort_ord"] > 0 else 99
-        if sort_choice.startswith("Cost"):   return (cost, eff, -r["tier"])
-        if sort_choice.startswith("Effort"): return (eff, cost, -r["tier"])
-        if sort_choice.startswith("Skill"):  return (-r["tier"], eff, cost)
+        tr = ml.tier_rank(r["tier"])           # T1 (easiest) first
+        if sort_choice.startswith("Cost"):   return (cost, eff, tr)
+        if sort_choice.startswith("Effort"): return (eff, cost, tr)
+        if sort_choice.startswith("Skill"):  return (tr, eff, cost)
         return (0,)   # recommended: keep the ranked order
     if not sort_choice.startswith("Recommended"):
         chosen.sort(key=_key)

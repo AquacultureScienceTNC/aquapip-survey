@@ -155,9 +155,9 @@ def _tier_pill(rec, S):
 # --------------------------------------------------------------------------- #
 # Main builder
 # --------------------------------------------------------------------------- #
-# Approximate cost ranges tied to the Low/Medium/High buckets in the database.
-# EDIT THESE to whatever figures the team prefers.
-COST_DOLLARS = {1: "< $500", 2: "$500 \u2013 $5,000", 3: "> $5,000"}
+# First-year cost bands per Evaluator Skill Rule 15 (2026 USD). Keep these in step
+# with the skill's Low/Medium/High cutoffs and the cost explainer in app.py.
+COST_DOLLARS = {1: "< $1,000", 2: "$1,000 \u2013 $10,000", 3: "> $10,000"}
 
 
 def cost_dollars(rec):
@@ -283,11 +283,13 @@ def build_pdf(submission, matches, code2label, name_map=None):
     # legend
     story.append(Spacer(1, 5))
     legend = ("Colour = who can run it:  "
-              "T4 Practitioner · T3 Partnership · T2 Researcher · T1 Reference.   "
-              "Cost = estimated $ range.   Dots ●○○→●●● = effort (low→high).   "
+              "T1 Practitioner · T2 Partnership · T3 Researcher.   "
+              "Cost = estimated first-year $ range (2026 USD).   Dots ●○○→●●● = effort (low→high).   "
               "★ = strong fit to your farm.   "
               "<font color='#3E7CB1'>✓</font> = builds on monitoring you already do.")
     story.append(Paragraph(legend, S["small"]))
+    story.append(Paragraph("Costs assume new gear and standard lab fees; a partner lab or shared gear "
+                           "can lower them a lot.", S["small"]))
 
     # ---- Detail pages ----------------------------------------------------- #
     story.append(PageBreak())
