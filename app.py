@@ -1,7 +1,8 @@
 """
 AquaPIP — MEL Monitoring Survey  (Streamlit app)
 
-Flow:  survey  ->  learn_indicators (indicator education)  ->
+Flow:  survey  ->  monitoring  ->  readiness ("How close are you?")  ->
+       learn_indicators (indicator education)  ->
        learn_classes (how to read the results)  ->  results
 
 Reads two workbooks from data/ (both by header name, so they update live):
@@ -16,6 +17,8 @@ import mel_logic as ml
 import report
 import storage
 import monitoring
+import readiness
+import readiness_logic
 
 # Full-width buttons/popovers: Streamlit 1.46+ takes width="stretch" and has
 # deprecated use_container_width; older versions only know the latter.
@@ -105,7 +108,8 @@ def get_data(_m_db, _m_ref):
     ref = ml.load_reference(REF_PATH)
     prof_opts = ml.profile_options(vocab, rows)
     mon = monitoring.load(REF_PATH)   # "what are you already monitoring?" screener
-    return rows, vocab, prof_opts, ref, mon
+    rd = readiness_logic.load(REF_PATH)   # "how close are you?" recipes (Readiness sheet)
+    return rows, vocab, prof_opts, ref, mon, rd
 
 
 for p, name in [(DB_PATH, "data/mel_database.xlsx"),
@@ -114,7 +118,7 @@ for p, name in [(DB_PATH, "data/mel_database.xlsx"),
         st.error(f"Missing `{name}`. Make sure it's in the repo's data/ folder.")
         st.stop()
 
-rows, vocab, prof_opts, ref, MON = get_data(os.path.getmtime(DB_PATH), os.path.getmtime(REF_PATH))
+rows, vocab, prof_opts, ref, MON, RD = get_data(os.path.getmtime(DB_PATH), os.path.getmtime(REF_PATH))
 AQUA_OPTS = vocab.get("Aquaculture Type") or [
     "Seaweed", "Mollusk", "Echinoderm", "Finfish", "Multi-trophic (IMTA)", "Not specific"]
 CODE_NAMES = ml.code_name_map(ref)   # code -> farmer-facing name (for scrubbing free text)
@@ -169,7 +173,7 @@ def _reset_survey():
     for k in keys:
         st.session_state.pop(k, None)
     for k in list(st.session_state):          # dynamic monitoring keys + shadows
-        if k.startswith("mon_") or k.startswith("_keep_mon_"):
+        if k.startswith("mon_") or k.startswith("_keep_mon_") or k.startswith("rd_"):
             st.session_state.pop(k, None)
     st.session_state["view"] = "survey"
 
@@ -364,7 +368,8 @@ def render_survey():
         else:
             st.session_state["p1"] = p1
             if _jump:   # straight back to results, keeping monitoring answers, reflecting these edits
-                prev = st.session_state.get("submission", {})
+                prev = {k: v for k, v in st.session_state.get("submission", {}).items()
+                        if not k.startswith("readout")}      # a readout from before these edits would be stale
                 st.session_state["submission"] = {**prev, **p1}
                 st.session_state["finalized"] = False
                 st.session_state["view"] = "results"
@@ -425,7 +430,7 @@ def render_monitoring():
     with bcol[0]:
         back = st.button("<-  Back", **_STRETCH)
     with bcol[1]:
-        go = st.button("Next  ->  MEL Framework Overview", type="primary", **_STRETCH)
+        go = st.button("Next  ->  How close are you?", type="primary", **_STRETCH)
     with bcol[2]:
         if st.button("Start over", **_STRETCH):
             _reset_survey(); st.rerun()
@@ -442,6 +447,26 @@ def render_monitoring():
         st.session_state["submission"] = sub
         st.session_state["_save_status"] = (
             storage.save_response(sub) if consent else (None, "no_consent"))
+        st.session_state["view"] = "results" if _jump else "readiness"
+        st.rerun()
+
+
+# --------------------------------------------------------------------------- #
+# VIEW 1c - HOW CLOSE ARE YOU?  (readiness: current monitoring vs each indicator)
+# --------------------------------------------------------------------------- #
+def render_readiness():
+    sub = st.session_state.get("submission")
+    if not sub:
+        st.session_state["view"] = "survey"; st.rerun(); return
+    _jump = _reco_jump_button("jump_readiness")
+    # the survey's own selection is the base; this page adds or removes on top of it
+    base = (st.session_state.get("p1") or {}).get("codes") or sub.get("codes", [])
+    action = readiness.render_page(sub, base, RD, ref, rows, stretch=_STRETCH)
+    st.session_state["submission"] = sub
+    if action == "back":
+        st.session_state["view"] = "monitoring"; st.rerun()
+    elif action == "next" or _jump:
+        st.session_state["finalized"] = False
         st.session_state["view"] = "results" if _jump else "learn_indicators"
         st.rerun()
 
@@ -1006,6 +1031,8 @@ if v == "survey":
     render_survey()
 elif v == "monitoring":
     render_monitoring()
+elif v == "readiness":
+    render_readiness()
 elif v == "learn_indicators":
     render_learn_indicators()
 elif v == "learn_classes":

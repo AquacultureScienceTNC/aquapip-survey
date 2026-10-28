@@ -3,6 +3,7 @@ AquaPIP — MEL Monitoring Survey
 PDF report generator.
 
 build_pdf(submission, matches, code2label) -> bytes
+build_readout_pdf(submission) -> bytes   (the "How close are you?" printout, 2 pages)
 
 Mirrors the "Your MEL Protocol Recommendations" slide:
   * Page 1  = summary (survey responses + one recommended protocol per indicator)
@@ -184,6 +185,10 @@ def build_pdf(submission, matches, code2label, name_map=None):
         f"from your Regenerative Aquaculture MEL survey", S["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=1, color=TEAL,
                             spaceBefore=0, spaceAfter=8))
+
+    # ---- How close you are (readiness readout) ---------------------------- #
+    if submission.get("readout"):
+        story.extend(readout_section(submission["readout"], S))
 
     # ---- Survey responses ------------------------------------------------- #
     story.append(Paragraph("YOUR SURVEY RESPONSES", S["h2"]))
@@ -461,3 +466,131 @@ if __name__ == "__main__":
     with open(out, "wb") as f:
         f.write(pdf)
     print(f"Wrote {out} ({len(pdf):,} bytes)")
+
+
+# --------------------------------------------------------------------------- #
+# "How close are you?" readout
+# --------------------------------------------------------------------------- #
+class _Bar(Flowable):
+    """Readiness bar: solid to the low score, hatched-light to the high score."""
+    def __init__(self, lo, hi, width=0.85 * inch, height=5):
+        super().__init__()
+        self.lo, self.hi, self.width, self.height = max(0, lo), max(0, hi), width, height
+
+    def wrap(self, aw, ah):
+        return self.width, self.height + 2
+
+    def draw(self):
+        c = self.canv
+        c.setFillColor(colors.HexColor("#E3EAEC")); c.setStrokeColor(colors.HexColor("#E3EAEC"))
+        c.roundRect(0, 1, self.width, self.height, self.height / 2, stroke=0, fill=1)
+        if self.hi > self.lo:
+            c.setFillColor(colors.HexColor("#9DBDC4"))
+            c.rect(self.width * self.lo / 100.0, 1, self.width * (self.hi - self.lo) / 100.0, self.height, stroke=0, fill=1)
+        if self.lo > 0:
+            c.setFillColor(TEAL)
+            c.rect(0, 1, self.width * self.lo / 100.0, self.height, stroke=0, fill=1)
+
+
+def readout_section(rows, S, title="HOW CLOSE YOU ARE"):
+    """Compact readout table: indicator / how close / next step. Used on page 1."""
+    out = [Paragraph(f"{title} &nbsp; <font size=8 color='#5B6B70'>\u00b7 closest first, against the "
+                     f"MEL Framework\u2019s minimum for each indicator</font>", S["h2"])]
+    head = [Paragraph(x, S["label"]) for x in ["INDICATOR", "HOW CLOSE", "NEXT STEP"]]
+    data = [head]
+    for r in rows:
+        nxt = r["next_text"]
+        if len(nxt) > 110:
+            nxt = nxt[:107].rsplit(" ", 1)[0] + "\u2026"
+        data.append([Paragraph(_esc(r["name"]), S["code"]),
+                     Table([[_Bar(r["lo"], r["hi"]), Paragraph("<b>%s</b>" % r["score"], S["val"])]],
+                           colWidths=[0.95 * inch, 0.9 * inch],
+                           style=[("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]),
+                     Paragraph(_esc(r["next_label"] + " " + nxt), S["small"])])
+    t = Table(data, colWidths=[1.95 * inch, 1.9 * inch, 3.25 * inch], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, TEAL),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, HAIR),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    out.append(t)
+    out.append(Spacer(1, 3))
+    out.append(Paragraph("Doing the measurement is worth 60 points; where you sample, how often and how you "
+                         "record it make up the other 40.", S["small"]))
+    return out
+
+
+def _esc(t):
+    return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def build_readout_pdf(submission):
+    """Two Letter pages: page 1 the readout, page 2 what each indicator means (with pictures)."""
+    import indicator_art
+    rows = submission.get("readout") or []
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.7 * inch, rightMargin=0.7 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch, title="Your monitoring readout")
+    S = _styles()
+    farm = submission.get("farm_name") or "your farm"
+    date = datetime.date.today().strftime("%d %b %Y")
+    story = [Paragraph("Your monitoring readout", S["title"]),
+             Paragraph(f"Prepared for {_esc(farm)} &nbsp;\u00b7&nbsp; {_esc(submission.get('aqua_type', ''))} "
+                       f"&nbsp;\u00b7&nbsp; {date}", S["subtitle"]),
+             HRFlowable(width="100%", thickness=1, color=TEAL, spaceBefore=0, spaceAfter=8)]
+    if submission.get("readout_summary"):
+        story.append(Paragraph(_esc(submission["readout_summary"]), S["body"]))
+    mons = submission.get("readout_monitoring") or []
+    if mons:
+        story.append(Paragraph("WHAT YOU TOLD US YOU MONITOR", S["label"]))
+        story.append(Paragraph(_esc(" \u00b7 ".join(mons)), S["val"]))
+    story.append(Spacer(1, 4))
+    head = [Paragraph(x, S["label"]) for x in ["INDICATOR", "HOW CLOSE", "IN PLACE AND NEXT STEP"]]
+    data = [head]
+    for r in rows:
+        right = [Paragraph("<b>In place:</b> " + _esc(r["in_place"]), S["body"]),
+                 Paragraph("<b>%s</b> %s" % (_esc(r["next_label"]), _esc(r["next_text"])), S["body"])]
+        if r.get("open_note"):
+            right.append(Paragraph(_esc(r["open_note"]), S["small"]))
+        data.append([[Paragraph(_esc(r["name"]), S["code"]), Paragraph(_esc(r["tagline"]), S["small"])],
+                     [Paragraph("<b>%s</b> &nbsp;<font size=7.5 color='#5B6B70'>%s</font>" % (r["score"], _esc(r["band"])), S["val"]),
+                      Spacer(1, 2), _Bar(r["lo"], r["hi"], width=1.1 * inch)],
+                     right])
+    t = Table(data, colWidths=[2.0 * inch, 1.45 * inch, 3.65 * inch], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, TEAL), ("LINEBELOW", (0, 1), (-1, -1), 0.4, HAIR),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("How these scores work: doing the measurement itself is worth 60 points; the other 40 come "
+                           "from where you sample, how often and how you record it, compared with the MEL Framework\u2019s "
+                           "minimum for each indicator. Measurements that only add context are listed but don\u2019t add points.",
+                           S["small"]))
+
+    # page 2 - what each indicator means
+    story.append(PageBreak())
+    story.append(Paragraph("What your indicators mean", S["title"]))
+    story.append(Paragraph("Short summaries of the indicators you picked, written from TNC\u2019s Global MEL Framework.",
+                           S["subtitle"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=TEAL, spaceBefore=0, spaceAfter=8))
+    for r in rows:
+        pic = indicator_art.drawing(r.get("picture"), 2.0 * inch)
+        txt = [Paragraph(_esc(r["name"]), S["proto"]), Spacer(1, 2), Paragraph(_esc(r["summary"]), S["body"])]
+        row = [[pic if pic is not None else Spacer(1, 1)], txt]
+        it = Table([row], colWidths=[2.2 * inch, 4.9 * inch])
+        it.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("LINEBELOW", (0, 0), (-1, -1), 0.4, HAIR)]))
+        story.append(KeepTogether([it]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Built on The Nature Conservancy\u2019s Global MEL Framework for Regenerative and "
+                           "Restorative Aquaculture.", S["footer"]))
+    doc.build(story)
+    return buf.getvalue()
