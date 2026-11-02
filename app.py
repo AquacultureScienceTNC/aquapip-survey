@@ -19,6 +19,7 @@ import storage
 import monitoring
 import readiness
 import readiness_logic
+import indicator_art
 
 # Full-width buttons/popovers: Streamlit 1.46+ takes width="stretch" and has
 # deprecated use_container_width; older versions only know the latter.
@@ -209,6 +210,12 @@ def indicator_card(ind):
 # --------------------------------------------------------------------------- #
 # VIEW 1 - SURVEY
 # --------------------------------------------------------------------------- #
+def _indicator_art(code, aqua):
+    """(picture file, tagline) for an indicator on this farm type, from the Readiness sheet."""
+    r = readiness_logic.recipe_for(RD, ml.sectors_for_aqua(aqua), code)
+    return (r["picture"], r["tagline"]) if r else ("", "")
+
+
 def render_survey():
     _persist_restore()
     _jump = False   # 'Back to Recommendations' is rendered beside step 2 below
@@ -261,7 +268,8 @@ def render_survey():
             _jump = st.button("\u21a9  Back to Recommendations", key="jump_survey",
                               **_STRETCH)
     st.caption("Tap a goal to light it up and add its indicators, then toggle any on or off below "
-               "\u2014 or pick indicators directly. Everything relevant to your farm is shown.")
+               "\u2014 or pick indicators directly. Everything relevant to your farm is shown. "
+               "Hover over an indicator to see a picture of what it measures.")
 
     _use_pills = hasattr(st, "pills")
     goal_names = list(ml.FARMER_GOALS.keys())
@@ -288,8 +296,12 @@ def render_survey():
             st.session_state[GROUP_KEYS[area]] = []
             continue
         labels = [it["label"] for it in inds]
+        # hovering an indicator pops up its picture + tagline (assets/indicators, Readiness sheet)
+        _hover = indicator_art.pill_hover_css(
+            GROUP_KEYS[area], [_indicator_art(it["code"], aqua) for it in inds]) if _use_pills else ""
         st.markdown(f"<div style='font-weight:700;color:{AREA_COLOR[area]};"
-                    f"margin:.55rem 0 .1rem'>{area}</div>", unsafe_allow_html=True)
+                    f"margin:.55rem 0 .1rem'>{area}</div>"
+                    + (f"<style>{_hover}</style>" if _hover else ""), unsafe_allow_html=True)
         if _use_pills:
             st.pills(area, labels, selection_mode="multi", key=GROUP_KEYS[area],
                      label_visibility="collapsed")

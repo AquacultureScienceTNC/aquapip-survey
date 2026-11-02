@@ -7,12 +7,15 @@ PDFs pick it up on the next run.
 
 svg_text(name)            -> SVG markup for the page (or "" if the file is missing)
 drawing(name, width_pt)   -> reportlab Drawing for PDFs (or None)
+pill_hover_css(key, items)-> CSS that pops a picture + tagline up when an st.pills option is hovered
 
 The PDF converter handles the subset the pictures use (rect, circle, ellipse, path with
 M/L/H/V/C/Q/T/A/Z, text, g, inline style or presentation attributes), so no extra
 dependency is needed. Curves are flattened to short line segments.
 """
 
+import base64
+import functools
 import math
 import os
 import re
@@ -31,6 +34,60 @@ def svg_text(name):
         return ""
     with open(p, encoding="utf-8") as f:
         return f.read()
+
+
+@functools.lru_cache(maxsize=256)
+def data_uri(name):
+    """The picture as a base64 data URI, for use in CSS (cached per file)."""
+    txt = svg_text(name)
+    if not txt:
+        return ""
+    return "data:image/svg+xml;base64," + base64.b64encode(txt.encode("utf-8")).decode("ascii")
+
+
+def _css_string(t):
+    return '"' + (t or "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
+
+
+def pill_hover_css(widget_key, items, width=260):
+    """CSS that shows an indicator's picture and tagline when its pill is hovered.
+
+    widget_key : the key given to st.pills (Streamlit adds the class st-key-<key>)
+    items      : [(picture name, tagline)] in the same order as the pills' options
+
+    Pure CSS, so it survives Streamlit reruns. Only applies on devices that can hover
+    (mouse or trackpad); on phones the pills behave as before. Popups are centred under
+    their pill, except the first pill's, which lines up with the left edge so it can't
+    run off the screen. Returns "" when there is nothing to show.
+    """
+    sel = ".st-key-%s" % widget_key
+    rules = []
+    for n, (pic, tag) in enumerate(items, 1):
+        uri = data_uri(pic) if pic else ""
+        if uri:
+            rules.append('%s button:nth-of-type(%d):hover::after{content:%s;background-image:url("%s")}'
+                         % (sel, n, _css_string(tag), uri))
+    if not rules:
+        return ""
+    pad_top = round(width * 150 / 320) + 8           # picture height (pictures are 320 x 150) + gap
+    base = (
+        "%(s)s button{position:relative;overflow:visible!important}"
+        "%(s)s [data-testid=\"stButtonGroup\"],%(s)s [data-baseweb=\"button-group\"]{overflow:visible!important}"
+        "%(s)s button:hover::after{position:absolute;left:50%%;top:calc(100%% + 8px);z-index:1000;"
+        "width:%(w)dpx;max-width:calc(100vw - 2rem);box-sizing:border-box;padding:%(pt)dpx 12px 10px;"
+        "background-color:#fff;background-repeat:no-repeat;background-position:top center;"
+        "background-size:100%% auto;border:1px solid #DDE5E7;border-radius:10px;"
+        "box-shadow:0 8px 24px rgba(11,79,92,.18);color:#1A2B2F;font-size:.85rem;font-weight:400;"
+        "line-height:1.35;text-align:left;white-space:normal;pointer-events:none;"
+        "animation:aqpop .16s ease .35s both}"
+        "%(s)s button:nth-of-type(1):hover::after{left:0;animation-name:aqpop0}"
+        % {"s": sel, "w": width, "pt": pad_top})
+    frames = ("@keyframes aqpop{from{opacity:0;transform:translate(-50%,-4px)}to{opacity:1;transform:translate(-50%,0)}}"
+              "@keyframes aqpop0{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}"
+              "@media (prefers-reduced-motion:reduce){"
+              "@keyframes aqpop{from{opacity:0;transform:translate(-50%,0)}to{opacity:1;transform:translate(-50%,0)}}"
+              "@keyframes aqpop0{from{opacity:0}to{opacity:1}}}")
+    return "@media (hover:hover) and (pointer:fine){" + base + "".join(rules) + "}" + frames
 
 
 # --------------------------------------------------------------------------- #
