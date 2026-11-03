@@ -47,12 +47,12 @@ CONTACT_URL = "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=wW2-eY7X
 
 # --------------------------------------------------------------------------- #
 # Other filtration tools, linked by species  (edit here)
-#   "redirect": this estimator doesn't calculate the species. Steps 2-4 are shown
-#               greyed out and the farmer is pointed to the other tool. A redirect
-#               species that isn't in the workbook is added to the species list.
-#               (Redirect wins even if the workbook later gains an equation for the
-#               species: switch it to "compare" if you want the estimate to run.)
-#   "compare":  the estimate runs as normal, with a link to compare.
+#   "redirect": used while this estimator can't calculate the species. Steps 2-4
+#               are shown greyed out and the farmer is pointed to the other tool.
+#               A redirect species that isn't in the workbook is added to the
+#               species list. As soon as the workbook has an equation for the
+#               species, its card switches to "compare" automatically.
+#   "compare":  the estimate runs (after "Continue here"), with a link to compare.
 # Keys are scientific names in lower case; they are matched against the workbook.
 # --------------------------------------------------------------------------- #
 FARM_URL = "http://www.farmscale.org/"
@@ -63,15 +63,12 @@ OTHER_TOOLS = {
         "name": "Crassostrea virginica", "common": "eastern oyster",
         "mode": "redirect", "tool": "Rutgers Oyster Eco-Serve Calculator",
         "url": "https://itsappserver.sebs.rutgers.edu/Oysterecoservecalc/",
-        "note": "This estimator doesn't calculate eastern oyster.",
         "why": ("It is built from feeding measurements taken on working oyster "
-                "farms, and covers farms from Massachusetts to Virginia."),
+                "farms from Massachusetts to Virginia."),
     },
     "mytilus galloprovincialis": {
         "name": "Mytilus galloprovincialis", "common": "Mediterranean mussel",
         "mode": "redirect", "tool": "FARM model", "url": FARM_URL,
-        "note": ("This estimator doesn't have a filtration equation for "
-                 "Mediterranean mussel yet."),
         "why": FARM_WHY,
     },
     "crassostrea gigas": {
@@ -161,17 +158,20 @@ def _continue_here(name):
     st.session_state["continue_for"] = name
 
 
-def other_tool_card(t, species=None, continued=False):
-    """'Are you measuring filtration rates in X?' card + a link to the other tool
-    (see OTHER_TOOLS near the top). Compare cards also get a 'Continue here'
-    button; the steps below stay greyed out until it is clicked."""
-    redirect = t["mode"] == "redirect"
-    body = ((t.get("note", "") + " ") if redirect else "") + \
-        f"The {t['tool']} may give a more site-specific estimate. {t['why']}"
+def other_tool_card(t, species=None, continued=False, mode=None):
+    """'Farming X?' card + a link to the other tool (see OTHER_TOOLS near the
+    top). Compare cards also get a 'Continue here' button; the steps below stay
+    greyed out until it is clicked. `mode` is the card's effective mode."""
+    redirect = (mode or t["mode"]) == "redirect"
+    if redirect:
+        body = (t.get("note") or f"This estimator doesn't include {t['common']} "
+                f"yet.") + f" Try the {t['tool']} instead. {t['why']}"
+    else:
+        body = f"The {t['tool']} may give a more site-specific estimate. {t['why']}"
     st.markdown(
         "<div class='card'>"
-        f"<b style='color:{TEAL}'>Are you measuring filtration rates in "
-        f"{t['common']}?</b><br><span class='v'>{body}</span></div>",
+        f"<b style='color:{TEAL}'>Farming {t['common']}?</b><br>"
+        f"<span class='v'>{body}</span></div>",
         unsafe_allow_html=True)
     if redirect:
         st.link_button(f"Go to the {t['tool']} ↗", t["url"], type="primary")
@@ -398,7 +398,8 @@ with st.expander("How to use this tool"):
         "(Not needed for species whose filtration is calculated from shell height "
         "directly.)\n"
         "4. **Enter your water temperature.**\n"
-        "5. Read the **estimated filtration** per size class and the totals.")
+        "5. Read **what one animal filters**, then **what your farm filters**, "
+        "each with its caveats.")
 
 
 # --------------------------------------------------------------------------- #
@@ -420,35 +421,46 @@ if not sel_name:
     st.info("Pick your species to start the estimate.")
     st.stop()
 
-# Species handled by another tool: point there and grey out the next steps.
-other = OTHER_TOOLS.get(fl.norm_species(sel_name).lower())
-if other and other["mode"] == "redirect":
-    other_tool_card(other)
+# Species handled by another tool. A "redirect" species is only redirected while
+# the workbook has no equation for it; once it does, it becomes a "compare".
+_key = fl.norm_species(sel_name).lower()
+other = OTHER_TOOLS.get(_key)
+_sp = next((s for s in SPECIES if s.name == sel_name), None)
+_can_calc = bool(_sp and _sp.calculable)
+other_mode = None
+if other:
+    other_mode = ("compare" if other["mode"] == "compare" or _can_calc
+                  else "redirect")
+if other_mode == "redirect":
+    other_tool_card(other, mode="redirect")
     greyed_next_steps()
     st.stop()
 
-sp = next(s for s in SPECIES if s.name == sel_name)
+sp = _sp
 
-# Not-yet-calculable species: grey out, show the sheet's own message.
+# Not-yet-calculable species: grey out, with a plain-language status.
 if not sp.calculable:
     st.markdown(
         f"<div class='card' style='border-left-color:#B9C2C5'>"
         f"<b style='color:{TEAL}'>{sp.name}</b><br>"
-        f"<span style='color:#5B6B70'>{sp.status_message} "
-        f"This species will become calculable here as the evidence base grows.</span></div>",
+        f"<span style='color:#5B6B70'>{sp.farmer_status} "
+        f"It will appear here as the evidence grows.</span></div>",
         unsafe_allow_html=True)
     st.stop()
 
 # Formula + per-species reference/notes button (side by side)
 fcol1, fcol2 = st.columns([3, 1])
 with fcol1:
-    if sp.in_full:
-        _eq_on = st.session_state.get("show_eq", False)
-        st.button("Hide equation" if _eq_on else "Show equation", key="eq_btn",
-                  on_click=_flip, args=("show_eq",))
-        if _eq_on:
-            st.markdown(f"<div class='formula'>{sp.in_full}</div>",
-                        unsafe_allow_html=True)
+    _eq_on = st.session_state.get("show_eq", False)
+    st.button("Hide equation" if _eq_on else "Show equation", key="eq_btn",
+              on_click=_flip, args=("show_eq",))
+    if _eq_on:
+        # Written out from the formula the tool actually runs, so it can never
+        # drift from the calculation. Excel syntax, ready to copy.
+        _eq, _legend = sp.display_equation()
+        st.code(_eq, language=None)
+        st.caption(_legend + " To run it yourself, for example in Excel, swap "
+                   "each letter for your own value or a cell reference.")
 with fcol2:
     with st.popover("📄 Reference & notes", use_container_width=True):
         st.markdown(f"**{sp.name}**")
@@ -457,7 +469,9 @@ with fcol2:
             st.markdown("**Reference(s)**")
             for r in matched:
                 st.markdown(f"- {r.full or r.cite}"
-                            + (f"  \n  [{r.link}]({r.link})" if r.link else ""))
+                            + (f"  \n  [{r.link}]({r.link})" if r.link else "")
+                            + (f"  \n  Free copy: [{r.free_link}]({r.free_link})"
+                               if r.free_link else ""))
         elif sp.reference:
             st.markdown(f"**Reference:** {sp.reference}")
         if sp.notes:
@@ -468,9 +482,9 @@ with fcol2:
 
 # Another tool covers this species too: offer it, and keep the estimate below
 # greyed out until the farmer chooses "Continue here".
-if other and other["mode"] == "compare":
+if other_mode == "compare":
     _here = st.session_state.get("continue_for") == sp.name
-    other_tool_card(other, species=sp.name, continued=_here)
+    other_tool_card(other, species=sp.name, continued=_here, mode="compare")
     if not _here:
         greyed_next_steps("The steps below are greyed out until you choose "
                           "Continue here.")
@@ -482,8 +496,17 @@ if other and other["mode"] == "compare":
 OPT_ONE = "Use average dry weight — download the protocol below for the correct way to obtain it"
 OPT_MEAS = "Use dry weight by size class — download the protocol below for the correct way to obtain it"
 OPT_EST = "Estimate dry weight from my shell height"
+
+# Why dry weight isn't asked for, for species whose equation uses shell height.
+LENGTH_NOTES = {
+    "mytilus edulis": (
+        "Not needed for blue mussel. Evidence suggests its filtration is better "
+        "predicted by shell height than by meat weight, which rises and falls with "
+        "the mussel's condition through the year. You can skip straight to "
+        "temperature."),
+}
 _dw_src_prev = st.session_state.get("dwsrc", OPT_ONE)
-# Shell height plays no part in a dry-weight species' clearance-rate formula when a
+# Shell height plays no part in a dry-weight species' filtration equation when a
 # single dry weight is applied to every animal — so it is greyed out in that case.
 shell_unused = (not sp.uses_length) and (_dw_src_prev == OPT_ONE)
 
@@ -550,8 +573,10 @@ dtw_list = [None] * len(size_classes)   # dry tissue weight (g) per size class
 dw_src = None                           # set when a dry-weight source is chosen
 
 if sp.uses_length:
-    st.info("Not needed for this species — its filtration is calculated from shell "
-            "height directly, so you can skip straight to temperature.")
+    st.info(LENGTH_NOTES.get(
+        fl.norm_species(sp.name).lower(),
+        "Not needed for this species. Its filtration equation uses shell height "
+        "directly, so you can skip straight to temperature."))
 else:
     convs = conversions_for(sp.name)
     src = st.radio("Dry-weight source", [OPT_ONE, OPT_MEAS, OPT_EST],
@@ -590,7 +615,7 @@ else:
             "<div class='card' style='margin-top:.6rem'>"
             "<b style='color:#0B4F5C'>Help improve the calculator</b><br>"
             "<span class='v'>We're always working to improve our length-to-dry-weight "
-            "estimates so we can give farmers the most accurate clearance rates. If "
+            "estimates so we can give farmers the most accurate filtration rates. If "
             "you'd like to contribute to this work, you can save your entries to be "
             "used in this calculator. Your name and email are optional, but help us "
             "credit you in any future publications or works. Thank you!</span></div>",
@@ -605,7 +630,7 @@ else:
                 st.markdown("**Contribute your dry-weight measurements**")
                 st.caption("We're always working to improve our length-to-dry-weight "
                            "estimates so we can give farmers the most accurate "
-                           "clearance rates. Tick the box below to save your entries "
+                           "filtration rates. Tick the box below to save your entries "
                            "to be used in this calculator. Your name and email are "
                            "optional, but help us credit you in any future "
                            "publications or works. Thank you!")
@@ -692,7 +717,59 @@ rows_for_calc = [{"shell_mm": sc["shell_mm"], "count": sc["count"],
                   "dtw_g": dtw_list[i]} for i, sc in enumerate(size_classes)]
 results, totals, notes = fl.compute_rows(sp, temp, rows_for_calc)
 
-step("Estimated water cleared")
+# ---- What one animal filters ----------------------------------------------- #
+# Every equation gives litres per animal per hour; the farm figures below are
+# simply that rate x the number of animals.
+step("What one animal filters")
+st.caption("Filtration rate (FR) is the volume of water one animal clears of "
+           "particles each hour. In the scientific literature it is often called "
+           "the clearance rate.")
+
+show_shell = sp.uses_length or dw_src in (OPT_MEAS, OPT_EST)
+ind_rows = []
+for i, e in enumerate(results):
+    row = {"Size class": i + 1}
+    if show_shell:
+        row["Shell height (mm)"] = sig(e["shell_mm"], 3) if e["shell_mm"] is not None else "—"
+    if not sp.uses_length:
+        row["Dry weight (g)"] = sig(e["dtw_g"], 3) if e["dtw_g"] is not None else "—"
+    row["Filtration rate (L) per individual per hour"] = (
+        sig(e["cr_lph"], 3) if e["cr_lph"] is not None else "—")
+    if e["error"]:
+        row["Note"] = e["error"]
+    ind_rows.append(row)
+if ind_rows:
+    st.dataframe(pd.DataFrame(ind_rows), use_container_width=True, hide_index=True)
+
+# The species' own validity range, where the workbook notes give one.
+_rng = sp.valid_temp_range
+if _rng and not (_rng[0] <= temp <= _rng[1]):
+    st.warning(f"This species' equation is only valid between {_rng[0]:g} and "
+               f"{_rng[1]:g} °C. Your temperature ({temp:.1f} °C) is outside that "
+               "range, so treat these numbers with extra caution.")
+for n in notes:
+    st.caption("⚠ " + n)
+
+st.markdown(
+    "<div class='caveat'><div class='hd'>⚠ Caveats for the rate per animal</div>"
+    "<p>These rates are a best-case maximum, worked out from water temperature "
+    "and animal size alone. On a real farm, a bivalve often filters less.</p>"
+    "<p><b>Food levels.</b> When food (phytoplankton and other particles) is "
+    "plentiful, bivalves are satiated more quickly and tend to filter less "
+    "water.</p>"
+    "<p><b>Water conditions.</b> Particle size, salinity, the amount of suspended "
+    "material, pollutants and the time of day can all lower filtration.</p>"
+    "<p><b>Limited evidence.</b> The equations often draw on, and are "
+    "extrapolated from, one or a small number of published studies. This limits "
+    "confidence in the numbers, but it is also a valuable area for "
+    "species-specific and farm-based research. If you have data that could "
+    "inform this tool, please get in touch using the contact form at the bottom "
+    "of the page.</p></div>",
+    unsafe_allow_html=True)
+
+
+# ---- What your farm filters ------------------------------------------------ #
+step("What your farm filters")
 m1, m2 = st.columns(2)
 with m1:
     st.markdown(f"<div class='metricbig'><div class='num'>{sig(totals['filt_m3d'],3)}</div>"
@@ -702,54 +779,28 @@ with m2:
     st.markdown(f"<div class='metricbig'><div class='num'>{sig(totals['filt_lph'],3)}</div>"
                 f"<div class='lab'>litres per hour (L/h)</div></div>",
                 unsafe_allow_html=True)
-st.caption(f"Total across **{fmt_int(totals['count'])}** animals at "
-           f"**{temp:.1f} °C**. This is a best-case maximum (see caveats below).")
+st.caption(f"Each animal's filtration rate × **{fmt_int(totals['count'])}** "
+           f"animals, at **{temp:.1f} °C**.")
 
-# Per-size-class breakdown: shell height (only when it's used), dry weight,
-# number, then the three stats.
-show_shell = sp.uses_length or dw_src in (OPT_MEAS, OPT_EST)
-show = []
-for e in results:
-    row = {}
-    if show_shell:
-        row["Shell height (mm)"] = sig(e["shell_mm"], 3) if e["shell_mm"] is not None else "—"
-    if not sp.uses_length:
-        row["Dry weight (g)"] = sig(e["dtw_g"], 3) if e["dtw_g"] is not None else "—"
-    row["Number of bivalves"] = fmt_int(e["count"])
-    row["Filtration rate (L) per individual per hour"] = (
-        sig(e["cr_lph"], 3) if e["cr_lph"] is not None else "—")
-    row["Filtration (L/h)"] = sig(e["filt_lph"], 3) if e["filt_lph"] is not None else "—"
-    row["Filtration m³/day"] = sig(e["filt_m3d"], 3) if e["filt_m3d"] is not None else "—"
-    if e["error"]:
-        row["Note"] = e["error"]
-    show.append(row)
+farm_rows = []
+for i, e in enumerate(results):
+    farm_rows.append({
+        "Size class": i + 1,
+        "Number of bivalves": fmt_int(e["count"]),
+        "Filtration (L/h)": sig(e["filt_lph"], 3) if e["filt_lph"] is not None else "—",
+        "Filtration m³/day": sig(e["filt_m3d"], 3) if e["filt_m3d"] is not None else "—",
+    })
+if len(farm_rows) > 1:
+    st.dataframe(pd.DataFrame(farm_rows), use_container_width=True, hide_index=True)
 
-if show:
-    st.dataframe(pd.DataFrame(show), use_container_width=True, hide_index=True)
-
-for n in notes:
-    st.caption("⚠ " + n)
-
-
-# --------------------------------------------------------------------------- #
-# Caveats — one card: the general caveats, then the farm-vs-wild caveat under a
-# divider. Shown here, after the person has entered their data and seen the estimate.
-# --------------------------------------------------------------------------- #
 st.markdown(
-    "<div class='caveat'><div class='hd'>⚠ Important caveats — please read</div>"
-    "<p>There are a number of caveats as to how the \"volume of water cleared\" "
-    "should be interpreted. Please be mindful of the fact that these estimates are "
-    "a best-case scenario derived on water temperature and bivalve size alone, and "
-    "do not account for: particle size, salinity, particulate matter concentration, "
-    "water flow rate, pollutant concentrations, or diurnal variability — all of "
-    "which may negatively affect the clearance rate. Furthermore, this tool does "
-    "not account for re-filtration of water, and assumes a perfectly mixed water "
-    "column.</p>"
-    "<p>The calculations often draw on and are extrapolated from one or a small "
-    "number of published studies. This limits the confidence in the calculations, "
-    "but also represents a valuable area for species-specific and farm-based "
-    "research. If you have data that may inform this tool, please reach out to us "
-    "using the contact form at the bottom of the page.</p>"
+    "<div class='caveat'><div class='hd'>⚠ Caveats for the farm total</div>"
+    "<p>The farm total assumes every animal filters at its maximum rate all the "
+    "time, in a perfectly mixed water column. It does not account for animals "
+    "re-filtering water that others have already filtered, or for how water "
+    "flow, tides and residence time move water through the farm.</p>"
+    "<p>It shows the volume of water your stock could clear, not the effect of "
+    "that filtering on the wider ecosystem.</p>"
     "<div class='sub'>Farm filtration is not equivalent to wild and restored "
     "bivalves</div>"
     "<p>It is important to recognise that ecosystem services supported by an "
@@ -765,7 +816,8 @@ st.markdown(
 # References (download all)
 # --------------------------------------------------------------------------- #
 step("References")
-st.caption("Every clearance-rate and length-weight source used by this tool.")
+st.caption("Every source behind the filtration equations and length-to-weight "
+           "conversions.")
 rc1, rc2 = st.columns(2)
 with rc1:
     try:
@@ -787,6 +839,8 @@ with st.expander(f"View all {len(REFS)} references"):
         line = f"**{r.cite}** — {r.full}" if r.full else f"**{r.cite}**"
         if r.link:
             line += f"  \n[{r.link}]({r.link})"
+        if r.free_link:
+            line += f"  \nFree copy: [{r.free_link}]({r.free_link})"
         st.markdown(line)
 
 
@@ -804,7 +858,4 @@ else:
             "filtration_app.py — e.g. the same Microsoft Form used for AquaPIP.)")
 
 st.divider()
-st.caption("Source: TNC Filtration Service Estimator workbook "
-           "(data/Clearance_rate_estimation_tool_TNC.xlsx). Species, equations, "
-           "conversions and references update automatically when the workbook is "
-           "updated. Companion to AquaPIP · The Nature Conservancy.")
+st.caption("A companion to AquaPIP, from The Nature Conservancy.")

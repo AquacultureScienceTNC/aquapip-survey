@@ -81,6 +81,8 @@ LW_H_REF     = "reference"
 REF_H_CITE = "citation"
 REF_H_FULL = "full reference"
 REF_H_LINK = "link"
+# OPTIONAL second link: a free copy for papers whose DOI lands on a paywall.
+REF_H_FREE = ("free link", "free copy", "open access link", "open access copy")
 
 # Variable convention used everywhere in this tool.
 VAR_T = "T"   # water temperature (°C)
@@ -313,6 +315,39 @@ class SpeciesEq:
     def uses_length(self):
         return VAR_L in self.uses
 
+    # ---- what farmers see ------------------------------------------------- #
+    # The tool reports this quantity as the FILTRATION RATE (FR): litres of water
+    # one animal clears of particles per hour. The source studies (and Philine's
+    # workbook) call it the clearance rate (CR); only the display changes.
+    def display_equation(self):
+        """(equation, legend) for farmers: the formula this tool actually runs,
+        written in Excel syntax with FR on the left and the inputs as T, SH and
+        DTW, plus a sentence explaining each letter."""
+        if not self.calculable:
+            return "", ""
+        raw = "" if self.raw_cr is None else str(self.raw_cr).strip()
+        eq = (excel_formula_to_display(raw) if raw.startswith("=")
+              else python_expr_to_display(self.expr))
+        return eq, equation_legend(eq)
+
+    @property
+    def farmer_status(self):
+        """Plain-language version of the sheet's 'not calculable' message."""
+        low = self.status_message.lower()
+        if any(k in low for k in ("may", "soon", "pending", "coming")):
+            return "A filtration equation for this species may be added soon."
+        return "No filtration equation is available for this species yet."
+
+    @property
+    def valid_temp_range(self):
+        """(low, high) in degC if the species notes give a validity range, e.g.
+        'Only valid for temps between 10 and 14C'; otherwise None."""
+        m = _VALID_RANGE_RE.search(self.notes or "")
+        if not m:
+            return None
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return (min(lo, hi), max(lo, hi))
+
     def clearance_rate(self, T, L=None, W=None):
         """Clearance rate in L per individual per hour. Returns (value, note).
         Negative results (temperature outside the fitted range) clamp to 0."""
@@ -364,10 +399,13 @@ class LWConversion:
 
 
 class Reference:
-    def __init__(self, cite, full, link):
+    def __init__(self, cite, full, link, free_link=None):
         self.cite = norm_species(cite)
         self.full = norm_species(full)
         self.link = extract_url(link)
+        self.free_link = extract_url(free_link)
+        if self.free_link == self.link:
+            self.free_link = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -499,6 +537,7 @@ def _load_references(wb):
         return out
     _, R = _header_index(ws)
     c_c = R(REF_H_CITE); c_f = R(REF_H_FULL); c_l = R(REF_H_LINK)
+    c_free = next((c for c in (R(h) for h in REF_H_FREE) if c and c != c_l), None)
     if not c_c:
         return out
     for r in range(2, ws.max_row + 1):
@@ -509,6 +548,7 @@ def _load_references(wb):
             cite=cite,
             full=ws.cell(r, c_f).value if c_f else None,
             link=ws.cell(r, c_l).value if c_l else None,
+            free_link=ws.cell(r, c_free).value if c_free else None,
         ))
     return out
 
@@ -618,6 +658,85 @@ def compute_rows(sp, T, rows):
 # --------------------------------------------------------------------------- #
 # Self-test (runs without Streamlit)
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Display helpers (farmer-facing notation)
+# --------------------------------------------------------------------------- #
+# Input cells -> the letters shown to farmers.
+DISPLAY_SYMBOLS = {"E": "T", "C": "SH", "D": "DTW"}
+_LEGEND = [
+    ("T", "T is the water temperature (°C)"),
+    ("SH", "SH is the mean shell height (mm)"),
+    ("DTW", "DTW is the average dry tissue weight (g)"),
+]
+_VALID_RANGE_RE = re.compile(
+    r"(?:valid|range|fitted)[^.]*?between\s+(-?\d+(?:\.\d+)?)\s*(?:°\s*C|C)?\s*"
+    r"(?:and|to|-|–)\s*(-?\d+(?:\.\d+)?)\s*(?:°\s*C|C)(?![a-zA-Z])", re.IGNORECASE)
+
+
+def excel_formula_to_display(formula):
+    """Excel CR formula -> 'FR = ...' in Excel syntax with T, SH and DTW."""
+    s = str(formula).strip()
+    if s.startswith("="):
+        s = s[1:]
+    s = _CELLREF_RE.sub(lambda m: DISPLAY_SYMBOLS.get(m.group(1).upper(), "?"), s)
+    s = _BARE_SHEET_RE.sub("", s).replace("$", "")
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"([A-Za-z_][A-Za-z0-9_]*)\(", lambda m: m.group(1).upper() + "(", s)
+    return "FR = " + s
+
+
+def python_expr_to_display(expr):
+    """Fallback for an 'Equation (py)' override: back to Excel-style notation."""
+    s = (expr or "").replace("**", "^")
+    s = re.sub(r"\bW\b", "DTW", s)
+    s = re.sub(r"\bL\b", "SH", s)
+    s = re.sub(r"\bexp\(", "EXP(", s)
+    s = re.sub(r"\blog\(", "LN(", s)
+    return "FR = " + re.sub(r"\s+", "", s)
+
+
+def equation_legend(eq):
+    """'where FR is ..., T is ... and DTW is ...' for the letters in eq."""
+    parts = ["FR is the filtration rate (litres per individual per hour)"]
+    parts += [txt for sym, txt in _LEGEND if re.search(rf"\b{sym}\b", eq)]
+    if len(parts) == 1:
+        return "where " + parts[0] + "."
+    return "where " + ", ".join(parts[:-1]) + " and " + parts[-1] + "."
+
+
+def display_to_expr(eq):
+    """Turn a displayed 'FR = ...' back into an evaluable expression (tests)."""
+    s = eq.split("=", 1)[1].strip()
+    s = s.replace("^", "**")
+    s = re.sub(r"\bDTW\b", "W", s)
+    s = re.sub(r"\bSH\b", "L", s)
+    s = re.sub(r"\bEXP\(", "exp(", s)
+    s = re.sub(r"\bLN\(", "log(", s)
+    return s
+
+
+# DOI links: always shown as https://doi.org/... (not http://dx.doi.org/...).
+_extract_url_raw = extract_url
+
+
+_SPRINGER_DOI_RE = re.compile(
+    r"link\.springer\.com/(?:content/pdf/|article/|chapter/)(10\.\d{4,9}/[^?#&\s]+?)"
+    r"(?:\.pdf)?(?=[?#&]|$)", re.IGNORECASE)
+
+
+def extract_url(value):
+    """As above, but DOI links are always https://doi.org/..., and a Springer
+    link (including a sign-in redirect wrapping one) becomes the DOI it contains."""
+    u = _extract_url_raw(value)
+    m = re.match(r"https?://(?:dx\.)?doi\.org/(.+)", u or "", re.IGNORECASE)
+    if m:
+        return "https://doi.org/" + m.group(1)
+    m = _SPRINGER_DOI_RE.search(u or "")
+    if m:
+        return "https://doi.org/" + m.group(1)
+    return u
+
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(here, "data", DEFAULT_WORKBOOK)

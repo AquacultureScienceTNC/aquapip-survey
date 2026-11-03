@@ -2,8 +2,12 @@
 TNC Filtration Service Estimator — reference exports.
 
 Two outputs, both built live from the workbook's References sheet:
-  * references_csv(refs)  -> bytes   (Citation, Full reference, Link)
-  * references_pdf(refs)  -> bytes   (formatted bibliography, AquaPIP styling)
+  * references_csv(refs)  -> bytes   (Citation, Full reference, Link, Free copy)
+  * references_pdf(refs)  -> bytes   (formatted reference list, AquaPIP styling)
+
+Each reference's main link is its DOI where one exists; "Free copy" is an
+optional second link (a free version of a paper whose DOI lands on a paywall),
+read from an optional "Free link" column in the References sheet.
 
 Kept Streamlit-independent so it can be tested on its own.
 """
@@ -18,9 +22,7 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
-)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, HRFlowable
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -30,30 +32,34 @@ INK = colors.HexColor("#1A2B2F")
 MUTED = colors.HexColor("#5B6B70")
 
 BODY_FONT, BOLD_FONT = "Helvetica", "Helvetica-Bold"
-for base, bold, paths in [
-    ("DejaVu", "DejaVu-Bold",
-     ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]),
-]:
-    try:
-        if all(os.path.exists(p) for p in paths):
-            pdfmetrics.registerFont(TTFont(base, paths[0]))
-            pdfmetrics.registerFont(TTFont(bold, paths[1]))
-            BODY_FONT, BOLD_FONT = base, bold
-    except Exception:
-        pass
+_DEJAVU = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+           "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+try:
+    if all(os.path.exists(p) for p in _DEJAVU):
+        pdfmetrics.registerFont(TTFont("DejaVu", _DEJAVU[0]))
+        pdfmetrics.registerFont(TTFont("DejaVu-Bold", _DEJAVU[1]))
+        BODY_FONT, BOLD_FONT = "DejaVu", "DejaVu-Bold"
+except Exception:
+    pass
+
+GAP = 10      # space between one reference and the next (pt)
+TIGHT = 1.5   # space between a reference and its own link(s) (pt)
 
 
 def _esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _free(r):
+    return getattr(r, "free_link", "") or ""
+
+
 def references_csv(refs):
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Citation", "Full reference", "Link"])
+    w.writerow(["Citation", "Full reference", "Link", "Free copy"])
     for r in refs:
-        w.writerow([r.cite, r.full, r.link])
+        w.writerow([r.cite, r.full, r.link, _free(r)])
     return buf.getvalue().encode("utf-8-sig")
 
 
@@ -72,34 +78,34 @@ def references_pdf(refs):
     sub = ParagraphStyle("st", fontName=BODY_FONT, textColor=MUTED,
                          fontSize=9.5, leading=13, spaceAfter=10)
     item = ParagraphStyle("it", fontName=BODY_FONT, textColor=INK,
-                          fontSize=9.5, leading=13, spaceAfter=9,
+                          fontSize=9.5, leading=13, spaceAfter=GAP,
                           leftIndent=14, firstLineIndent=-14)
     link = ParagraphStyle("lk", fontName=BODY_FONT, textColor=TEAL,
-                          fontSize=8.5, leading=11, spaceAfter=2, leftIndent=14)
-    foot = ParagraphStyle("ft", fontName=BODY_FONT, textColor=MUTED,
-                          fontSize=7.5, leading=10)
+                          fontSize=8.5, leading=11, spaceAfter=GAP, leftIndent=14)
 
     story = [Paragraph("Filtration Service Estimator — References", title)]
     date = datetime.date.today().strftime("%d %b %Y")
     story.append(Paragraph(
-        f"Clearance-rate and length-weight sources &nbsp;·&nbsp; "
-        f"generated {date} &nbsp;·&nbsp; The Nature Conservancy", sub))
+        "Sources for the filtration equations and length-to-weight conversions. "
+        f"The Nature Conservancy, {date}.", sub))
     story.append(HRFlowable(width="100%", thickness=1, color=TEAL, spaceAfter=10))
 
     for r in sorted(refs, key=lambda x: x.cite.lower()):
-        full = _esc(r.full) or _esc(r.cite)
-        story.append(Paragraph(full, item))
-        if r.link:
+        links = [("", r.link)] if r.link else []
+        if _free(r):
+            links.append(("Free copy: ", _free(r)))
+        # The reference sits tight against its own link(s); the gap comes AFTER
+        # the last link, so each link reads as part of the reference above it.
+        st_item = ParagraphStyle("itx", parent=item,
+                                 spaceAfter=TIGHT if links else GAP)
+        story.append(Paragraph(_esc(r.full) or _esc(r.cite), st_item))
+        for i, (prefix, url) in enumerate(links):
+            last = i == len(links) - 1
+            st_link = ParagraphStyle("lkx", parent=link,
+                                     spaceAfter=GAP if last else TIGHT)
             story.append(Paragraph(
-                f'<a href="{r.link}" color="#0B4F5C"><u>{_esc(r.link)}</u></a>', link))
-
-    story.append(Spacer(1, 8))
-    story.append(HRFlowable(width="100%", thickness=0.4,
-                            color=colors.HexColor("#D7DEE0"), spaceAfter=6))
-    story.append(Paragraph(
-        "Source: TNC Filtration Service Estimator workbook "
-        "(data/Clearance_rate_estimation_tool_TNC.xlsx). This reference list "
-        "regenerates automatically when the workbook is updated.", foot))
+                f'{prefix}<a href="{_esc(url)}" color="#0B4F5C"><u>{_esc(url)}</u></a>',
+                st_link))
 
     doc.build(story)
     return buf.getvalue()

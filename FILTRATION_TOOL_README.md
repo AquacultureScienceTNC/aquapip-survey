@@ -160,3 +160,33 @@ Several equations are fitted around a species' measured temperature range and ca
 return a negative rate far outside it. The tool **caps negative estimates at 0** and
 flags that temperature was outside the fitted range, so a farmer never sees a
 nonsensical negative number.
+
+## Updates, November 2026
+
+**Terminology.** Everything a farmer reads now says *filtration rate (FR)*: the
+litres of water one animal clears of particles per hour. The tool notes once that
+the scientific literature often calls this the clearance rate. Philine's workbook
+keeps "CR" internally; only the display changes.
+
+**Equations shown in the app** are written out from the formula the tool actually
+runs (Excel syntax, with T = water temperature in °C, SH = mean shell height in mm,
+DTW = average dry tissue weight in g), plus a legend for the letters used. The
+workbook's `Formula_in_full` column is no longer displayed, so it can't drift from
+the calculation.
+
+**Results** come in two parts: *What one animal filters* (rate per size class,
+then caveats about the animal's physiology, including food levels) and *What your
+farm filters* (totals, then farm-scale caveats and the farm-vs-wild note).
+
+**Temperature validity.** If a species' Notes cell says something like "Only valid
+for temps between 10 and 14C", the app warns when the entered temperature is
+outside that range.
+
+**Other tools (`OTHER_TOOLS` in `filtration_app.py`).** A "redirect" species is
+only redirected while the workbook has no equation for it. Once Philine adds one,
+its card switches to "compare" automatically.
+
+**References.** DOI links are shown as `https://doi.org/...`, and Springer links
+(including sign-in redirects) are shown as the DOI they contain. An optional
+column headed **Free link** in the References sheet adds a second, free-copy link
+to the web list, the PDF and the CSV.
